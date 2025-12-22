@@ -804,20 +804,20 @@ async function setupShellAlias() {
     rcFile = path.join(HOME, '.profile');
   }
   
-  const aliasLine = `\\n# Claude Code Auto Reporter\\nalias claude='python3 ${INSTALL_DIR}/claude-reporter.py'\\n`;
+  const aliasLine = `\n# Claude Code Auto Reporter\nalias claude='python3 ${INSTALL_DIR}/claude-reporter.py'\n`;
   
   // Check if alias already exists
   if (fs.existsSync(rcFile)) {
     const content = fs.readFileSync(rcFile, 'utf-8');
     if (!content.includes('claude-reporter')) {
       fs.appendFileSync(rcFile, aliasLine);
-      spinner.succeed(\`Alias configured in \${path.basename(rcFile)}\`);
+      spinner.succeed(`Alias configured in ${path.basename(rcFile)}`);
     } else {
       spinner.info('Alias already exists');
     }
   } else {
     fs.writeFileSync(rcFile, aliasLine);
-    spinner.succeed(\`Shell configuration created\`);
+    spinner.succeed('Shell configuration created');
   }
 }
 
@@ -825,10 +825,10 @@ function createHelperScripts() {
   const spinner = ora('Creating helper scripts...').start();
   
   // View reports script
-  const viewScript = \`#!/bin/bash
+  const viewScript = `#!/bin/bash
 cd ~/.claude-reporter/reports
 ls -lt | head -20
-\`;
+`;
   
   fs.writeFileSync(
     path.join(INSTALL_DIR, 'view-reports.sh'),
@@ -837,7 +837,7 @@ ls -lt | head -20
   );
   
   // Update webhook script
-  const updateWebhook = \`#!/bin/bash
+  const updateWebhook = `#!/bin/bash
 echo "🔗 Update Webhook URL"
 echo ""
 read -p "Enter new webhook URL: " URL
@@ -845,12 +845,12 @@ python3 << EOF
 import json
 with open('${CONFIG_FILE}', 'r') as f:
     config = json.load(f)
-config['report_endpoint'] = '\$URL'
+config['report_endpoint'] = '$URL'
 with open('${CONFIG_FILE}', 'w') as f:
     json.dump(config, f, indent=2)
 print("✅ Updated!")
 EOF
-\`;
+`;
   
   fs.writeFileSync(
     path.join(INSTALL_DIR, 'update-webhook.sh'),
@@ -865,7 +865,7 @@ async function testInstallation() {
   const spinner = ora('Testing installation...').start();
   
   try {
-    const testCmd = \`python3 \${INSTALL_DIR}/claude-reporter.py --config\`;
+    const testCmd = `python3 ${INSTALL_DIR}/claude-reporter.py --config`;
     execSync(testCmd, { stdio: 'pipe' });
     spinner.succeed('Installation test passed');
   } catch (error) {
@@ -879,12 +879,28 @@ function showSuccessMessage(config) {
   
   console.log(chalk.cyan.bold('🎉 You\'re all set!\n'));
   
-  console.log('Just open a ' + chalk.yellow('new terminal') + ' and use Claude as normal:\n');
-  console.log(chalk.yellow('   claude chat'));
-  console.log(chalk.yellow('   claude code fix-bug.py'));
-  console.log(chalk.yellow('   claude ask "help me with..."'));
+  // Check which shell
+  const shell = process.env.SHELL || '';
+  let rcFile = '';
+  if (shell.includes('zsh')) {
+    rcFile = '~/.zshrc';
+  } else if (shell.includes('bash')) {
+    rcFile = '~/.bashrc';
+  } else {
+    rcFile = '~/.profile';
+  }
   
-  console.log(chalk.gray('\n📊 Sessions are automatically tracked and saved!\n'));
+  console.log(chalk.yellow.bold('⚠️  IMPORTANT: Open a NEW terminal window/tab\n'));
+  
+  console.log('Then use Claude as normal:\n');
+  console.log(chalk.cyan('   claude chat'));
+  console.log(chalk.cyan('   claude code fix-bug.py'));
+  console.log(chalk.cyan('   claude ask "help me with..."'));
+  
+  console.log(chalk.gray('\n💡 Alternative: Reload current terminal:\n'));
+  console.log(chalk.gray('   source ' + rcFile));
+  
+  console.log(chalk.gray('\n📊 Sessions are automatically tracked!\n'));
   
   // Show storage location based on type
   const storageType = config.storage_type || 'local';
@@ -896,8 +912,8 @@ function showSuccessMessage(config) {
     console.log(chalk.cyan('💾 Reports → ~/.claude-reporter/reports/'));
   }
   
-  console.log(chalk.gray('\n💡 View history anytime: ') + chalk.yellow('claude --view'));
-  console.log(chalk.gray('💡 Switch storage: ') + chalk.yellow('~/.claude-reporter/switch-storage.sh'));
+  console.log(chalk.gray('\n💡 View history: ') + chalk.cyan('claude --view'));
+  console.log(chalk.gray('💡 Switch storage: ') + chalk.cyan('~/.claude-reporter/switch-storage.sh'));
   
   console.log(chalk.green('\n🚀 Happy coding!\n'));
 }

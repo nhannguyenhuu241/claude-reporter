@@ -46,9 +46,17 @@ claude --view
 
 ## ❓ Cần giúp?
 
-Mở terminal mới chưa? → **Mở terminal mới!**
+**"command not found: claude"?**
 
-Vẫn lỗi? → Xem [COMPLETE_GUIDE.md](COMPLETE_GUIDE.md)
+→ **Mở terminal MỚI!**
+
+Hoặc chạy: `source ~/.zshrc`
+
+---
+
+**Vẫn lỗi?**
+
+→ Xem [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 ## 🎉 Xong!
 

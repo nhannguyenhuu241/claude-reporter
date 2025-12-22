@@ -50,7 +50,10 @@ claude --view
 ## ❓ FAQ
 
 **Q: Tôi phải làm gì sau khi cài?**  
-A: Mở terminal mới. Dùng `claude` bình thường. Không cần làm gì thêm!
+A: **Mở terminal mới!** Cmd+T (Mac) hoặc Ctrl+Shift+T (Linux). Rồi dùng `claude` bình thường.
+
+**Q: Lỗi "command not found: claude"?**  
+A: Bạn chưa mở terminal mới. Mở terminal mới hoặc chạy `source ~/.zshrc` (hoặc `~/.bashrc`)
 
 **Q: Làm sao biết nó hoạt động?**  
 A: Chạy `claude chat`, kết thúc, rồi chạy `claude --view`. Sẽ thấy session vừa rồi.
@@ -60,6 +63,9 @@ A: Chạy `~/.claude-reporter/switch-storage.sh`
 
 **Q: Google Drive folder ID là gì?**  
 A: Xem [GDRIVE_SETUP.md](GDRIVE_SETUP.md)
+
+**Q: Vẫn có lỗi?**  
+A: Xem [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 ---
 

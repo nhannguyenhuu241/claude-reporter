@@ -62,6 +62,29 @@ npm install
 node bin/setup.js
 ```
 
+## 🐛 Troubleshooting
+
+### "command not found: claude"
+
+**→ Mở terminal MỚI!** (Cmd+T hoặc Ctrl+Shift+T)
+
+Hoặc reload:
+```bash
+source ~/.zshrc  # or ~/.bashrc
+```
+
+### More issues?
+
+📖 Full guide: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+
+Common fixes:
+- Open NEW terminal window
+- Run `source ~/.zshrc` or `source ~/.bashrc`
+- Check `which claude`
+- Re-run setup: `npx claude-reporter-setup`
+
+---
+
 ## 🎯 Usage
 
 ### Dùng Claude bình thường
