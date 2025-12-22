@@ -715,7 +715,233 @@ class ClaudeReporter:
 
         except Exception as e:
             print(f"Discord notification failed: {e}")
-    
+
+    def start_server(self, port=8765):
+        """Start local HTTP server for viewing reports"""
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        import urllib.parse
+        import webbrowser
+
+        reporter = self
+
+        class ReportHandler(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):
+                pass  # Suppress default logging
+
+            def do_GET(self):
+                parsed = urllib.parse.urlparse(self.path)
+                path = parsed.path
+
+                if path == '/' or path == '/index.html':
+                    self.send_html(self.get_dashboard())
+                elif path == '/api/sessions':
+                    self.send_json(self.get_sessions())
+                elif path.startswith('/api/session/'):
+                    session_id = path.split('/')[-1]
+                    self.send_json(self.get_session_detail(session_id))
+                elif path.startswith('/session/'):
+                    session_id = path.split('/')[-1]
+                    self.send_html(self.get_session_page(session_id))
+                else:
+                    self.send_error(404)
+
+            def send_html(self, content):
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(content.encode('utf-8'))
+
+            def send_json(self, data):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(data).encode('utf-8'))
+
+            def get_sessions(self):
+                conn = sqlite3.connect(str(reporter.db_path))
+                rows = conn.execute('''
+                    SELECT session_id, started_at, ended_at, status, working_dir, command, exit_code
+                    FROM sessions ORDER BY started_at DESC LIMIT 100
+                ''').fetchall()
+                conn.close()
+                return [{
+                    'id': r[0], 'started': r[1], 'ended': r[2],
+                    'status': r[3], 'dir': r[4], 'command': r[5], 'exit_code': r[6]
+                } for r in rows]
+
+            def get_session_detail(self, session_id):
+                data = reporter.get_session_data(session_id)
+                if data:
+                    # Read full log
+                    log_path = reporter.install_dir / 'logs' / f'{session_id}.log'
+                    if log_path.exists():
+                        try:
+                            data['full_log'] = log_path.read_text(encoding='utf-8', errors='replace')
+                        except:
+                            data['full_log'] = data.get('log_preview', '')
+                return data or {}
+
+            def get_dashboard(self):
+                return '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Reporter Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #e0e0e0; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        h1 { color: #7c3aed; margin-bottom: 20px; display: flex; align-items: center; gap: 10px; }
+        h1::before { content: '🤖'; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 30px; }
+        .stat-card { background: #1a1a1a; padding: 20px; border-radius: 12px; text-align: center; border: 1px solid #333; }
+        .stat-card .number { font-size: 2em; font-weight: bold; color: #7c3aed; }
+        .stat-card .label { color: #888; margin-top: 5px; }
+        .sessions { background: #1a1a1a; border-radius: 12px; border: 1px solid #333; overflow: hidden; }
+        .session { padding: 15px 20px; border-bottom: 1px solid #333; display: grid; grid-template-columns: auto 1fr auto; gap: 15px; align-items: center; cursor: pointer; transition: background 0.2s; }
+        .session:hover { background: #252525; }
+        .session:last-child { border-bottom: none; }
+        .status { width: 12px; height: 12px; border-radius: 50%; }
+        .status.completed { background: #22c55e; }
+        .status.error { background: #ef4444; }
+        .status.interrupted { background: #f59e0b; }
+        .status.running { background: #3b82f6; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .session-info { overflow: hidden; }
+        .session-id { font-family: monospace; color: #7c3aed; font-size: 0.9em; }
+        .session-cmd { color: #888; font-size: 0.85em; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .session-time { color: #666; font-size: 0.85em; text-align: right; white-space: nowrap; }
+        .refresh-btn { background: #7c3aed; color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; margin-bottom: 20px; }
+        .refresh-btn:hover { background: #6d28d9; }
+        .empty { text-align: center; padding: 40px; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Claude Reporter Dashboard</h1>
+        <button class="refresh-btn" onclick="loadSessions()">🔄 Refresh</button>
+        <div class="stats" id="stats"></div>
+        <div class="sessions" id="sessions"><div class="empty">Loading...</div></div>
+    </div>
+    <script>
+        async function loadSessions() {
+            const res = await fetch('/api/sessions');
+            const sessions = await res.json();
+
+            const stats = { total: sessions.length, completed: 0, error: 0, interrupted: 0 };
+            sessions.forEach(s => { if (stats[s.status] !== undefined) stats[s.status]++; });
+
+            document.getElementById('stats').innerHTML = \\`
+                <div class="stat-card"><div class="number">\${stats.total}</div><div class="label">Total</div></div>
+                <div class="stat-card"><div class="number" style="color:#22c55e">\${stats.completed}</div><div class="label">Completed</div></div>
+                <div class="stat-card"><div class="number" style="color:#ef4444">\${stats.error}</div><div class="label">Errors</div></div>
+                <div class="stat-card"><div class="number" style="color:#f59e0b">\${stats.interrupted}</div><div class="label">Interrupted</div></div>
+            \\`;
+
+            if (sessions.length === 0) {
+                document.getElementById('sessions').innerHTML = '<div class="empty">No sessions yet</div>';
+                return;
+            }
+
+            document.getElementById('sessions').innerHTML = sessions.map(s => \\`
+                <div class="session" onclick="location.href='/session/\${s.id}'">
+                    <div class="status \${s.status}"></div>
+                    <div class="session-info">
+                        <div class="session-id">\${s.id.slice(0,8)}...</div>
+                        <div class="session-cmd">\${s.command || s.dir}</div>
+                    </div>
+                    <div class="session-time">\${new Date(s.started).toLocaleString()}</div>
+                </div>
+            \\`).join('');
+        }
+        loadSessions();
+        setInterval(loadSessions, 10000);
+    </script>
+</body>
+</html>'''
+
+            def get_session_page(self, session_id):
+                return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Session {session_id[:8]}...</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f0f0f; color: #e0e0e0; }}
+        .container {{ max-width: 1000px; margin: 0 auto; padding: 20px; }}
+        h1 {{ color: #7c3aed; margin-bottom: 20px; font-size: 1.5em; }}
+        .back {{ color: #7c3aed; text-decoration: none; display: inline-block; margin-bottom: 20px; }}
+        .back:hover {{ text-decoration: underline; }}
+        .meta {{ background: #1a1a1a; padding: 20px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #333; }}
+        .meta-row {{ display: flex; margin-bottom: 10px; }}
+        .meta-label {{ color: #888; width: 120px; }}
+        .meta-value {{ color: #e0e0e0; font-family: monospace; }}
+        .status {{ display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.85em; }}
+        .status.completed {{ background: #22c55e33; color: #22c55e; }}
+        .status.error {{ background: #ef444433; color: #ef4444; }}
+        .status.interrupted {{ background: #f59e0b33; color: #f59e0b; }}
+        .log {{ background: #1a1a1a; padding: 20px; border-radius: 12px; border: 1px solid #333; }}
+        .log h2 {{ color: #7c3aed; margin-bottom: 15px; font-size: 1.1em; }}
+        .log pre {{ background: #0a0a0a; padding: 15px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; font-family: 'SF Mono', Monaco, monospace; font-size: 0.9em; line-height: 1.5; max-height: 600px; overflow-y: auto; }}
+        .loading {{ text-align: center; padding: 40px; color: #666; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="back">← Back to Dashboard</a>
+        <h1>Session {session_id[:8]}...</h1>
+        <div class="meta" id="meta"><div class="loading">Loading...</div></div>
+        <div class="log">
+            <h2>📝 Conversation Log</h2>
+            <pre id="log">Loading...</pre>
+        </div>
+    </div>
+    <script>
+        async function loadSession() {{
+            const res = await fetch('/api/session/{session_id}');
+            const s = await res.json();
+
+            if (!s.session_id) {{
+                document.getElementById('meta').innerHTML = '<div class="loading">Session not found</div>';
+                document.getElementById('log').textContent = 'No data available';
+                return;
+            }}
+
+            document.getElementById('meta').innerHTML = \\`
+                <div class="meta-row"><span class="meta-label">Session ID</span><span class="meta-value">\${{s.session_id}}</span></div>
+                <div class="meta-row"><span class="meta-label">Status</span><span class="status \${{s.status}}">\${{s.status?.toUpperCase()}}</span></div>
+                <div class="meta-row"><span class="meta-label">Started</span><span class="meta-value">\${{s.started_at}}</span></div>
+                <div class="meta-row"><span class="meta-label">Ended</span><span class="meta-value">\${{s.ended_at || 'N/A'}}</span></div>
+                <div class="meta-row"><span class="meta-label">Directory</span><span class="meta-value">\${{s.working_dir}}</span></div>
+                <div class="meta-row"><span class="meta-label">Command</span><span class="meta-value">\${{s.command}}</span></div>
+                <div class="meta-row"><span class="meta-label">Exit Code</span><span class="meta-value">\${{s.exit_code ?? 'N/A'}}</span></div>
+            \\`;
+
+            document.getElementById('log').textContent = s.full_log || s.log_preview || 'No log available';
+        }}
+        loadSession();
+    </script>
+</body>
+</html>'''
+
+        print(f"\\n🌐 Claude Reporter Dashboard")
+        print(f"   http://localhost:{port}")
+        print(f"\\n   Press Ctrl+C to stop\\n")
+
+        try:
+            webbrowser.open(f'http://localhost:{port}')
+        except:
+            pass
+
+        try:
+            server = HTTPServer(('localhost', port), ReportHandler)
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("\\n👋 Server stopped")
+
     def run_wrapper(self, args):
         """Wrap Claude CLI execution"""
         import uuid
@@ -749,25 +975,9 @@ class ClaudeReporter:
         atexit.register(cleanup)
 
         try:
-            # Check if running interactively (no subcommand or interactive subcommands)
-            # Claude CLI needs direct terminal access for interactive mode
-            is_interactive = len(args) == 1 or (len(args) > 1 and args[1] in ['chat', 'code', ''])
-
-            if is_interactive and sys.stdin.isatty() and sys.stdout.isatty():
-                # Interactive mode - run directly without capturing output
-                # This allows Claude CLI to have full terminal control
-                with open(log_file, 'w', encoding='utf-8') as f:
-                    f.write(f"[Interactive session started at {datetime.now().isoformat()}]\\n")
-                    f.write(f"Command: {' '.join(args)}\\n")
-                    f.write(f"Working dir: {working_dir}\\n")
-                    f.write("---\\n")
-
-                # Run with inherited stdio for full interactivity
-                exit_code = subprocess.call(args)
-
-                with open(log_file, 'a', encoding='utf-8') as f:
-                    f.write(f"\\n---\\n[Session ended with exit code {exit_code}]\\n")
-
+            # Try to use PTY for interactive sessions with logging
+            if sys.stdin.isatty() and sys.stdout.isatty():
+                exit_code = self.run_with_pty(args, log_file)
                 if exit_code != 0:
                     status = 'error'
             else:
@@ -801,6 +1011,113 @@ class ClaudeReporter:
             cleanup()
 
         return exit_code
+
+    def run_with_pty(self, args, log_file):
+        """Run command with PTY to capture interactive output"""
+        import select
+
+        # Try to use pty module (Unix only)
+        try:
+            import pty
+            import tty
+            import termios
+
+            # Save original terminal settings
+            old_settings = termios.tcgetattr(sys.stdin)
+
+            master_fd, slave_fd = pty.openpty()
+
+            try:
+                # Start the process with PTY
+                process = subprocess.Popen(
+                    args,
+                    stdin=slave_fd,
+                    stdout=slave_fd,
+                    stderr=slave_fd,
+                    close_fds=True
+                )
+                os.close(slave_fd)
+
+                # Set terminal to raw mode
+                tty.setraw(sys.stdin.fileno())
+
+                with open(log_file, 'w', encoding='utf-8', errors='replace') as f:
+                    f.write(f"[Session started at {datetime.now().isoformat()}]\\n")
+                    f.write(f"Command: {' '.join(args)}\\n")
+                    f.write(f"Working dir: {os.getcwd()}\\n")
+                    f.write("=" * 50 + "\\n\\n")
+
+                    while process.poll() is None:
+                        # Check if there's data to read from master or stdin
+                        rlist, _, _ = select.select([master_fd, sys.stdin], [], [], 0.1)
+
+                        for fd in rlist:
+                            if fd == master_fd:
+                                # Data from the process
+                                try:
+                                    data = os.read(master_fd, 1024)
+                                    if data:
+                                        # Write to terminal
+                                        os.write(sys.stdout.fileno(), data)
+                                        # Write to log file
+                                        try:
+                                            f.write(data.decode('utf-8', errors='replace'))
+                                            f.flush()
+                                        except:
+                                            pass
+                                except OSError:
+                                    break
+
+                            elif fd == sys.stdin:
+                                # Data from user input
+                                try:
+                                    data = os.read(sys.stdin.fileno(), 1024)
+                                    if data:
+                                        os.write(master_fd, data)
+                                except OSError:
+                                    break
+
+                    # Read any remaining output
+                    try:
+                        while True:
+                            rlist, _, _ = select.select([master_fd], [], [], 0.1)
+                            if not rlist:
+                                break
+                            data = os.read(master_fd, 1024)
+                            if not data:
+                                break
+                            os.write(sys.stdout.fileno(), data)
+                            try:
+                                f.write(data.decode('utf-8', errors='replace'))
+                            except:
+                                pass
+                    except:
+                        pass
+
+                    f.write("\\n\\n" + "=" * 50 + "\\n")
+                    f.write(f"[Session ended at {datetime.now().isoformat()}]\\n")
+
+                os.close(master_fd)
+                return process.returncode or 0
+
+            finally:
+                # Restore terminal settings
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+
+        except ImportError:
+            # PTY not available (Windows) - fall back to direct execution
+            print("⚠️  PTY not available, logs may be limited")
+            with open(log_file, 'w', encoding='utf-8') as f:
+                f.write(f"[Interactive session - PTY not available]\\n")
+                f.write(f"Command: {' '.join(args)}\\n")
+                f.write(f"Working dir: {os.getcwd()}\\n")
+
+            return subprocess.call(args)
+
+        except Exception as e:
+            # Fallback if PTY fails
+            print(f"⚠️  PTY error: {e}, running without logging")
+            return subprocess.call(args)
 
 def main():
     reporter = ClaudeReporter()
@@ -838,19 +1155,29 @@ def main():
         elif cmd == '--stats':
             conn = sqlite3.connect(str(reporter.db_path))
             stats = conn.execute('''
-                SELECT 
+                SELECT
                     status,
                     COUNT(*) as count
                 FROM sessions
                 GROUP BY status
             ''').fetchall()
             conn.close()
-            
+
             print("\\n📈 Statistics:\\n")
             for status, count in stats:
                 print(f"  {status}: {count}")
             return 0
-    
+
+        elif cmd == '--serve':
+            port = 8765
+            if len(sys.argv) > 2:
+                try:
+                    port = int(sys.argv[2])
+                except:
+                    pass
+            reporter.start_server(port)
+            return 0
+
     # Find real Claude CLI
     claude_path = None
     for path_dir in os.environ.get('PATH', '').split(':'):
@@ -1324,8 +1651,8 @@ function showSuccessMessage(config) {
   console.log(chalk.gray('   View history:    ') + chalk.cyan('claude --view'));
   console.log(chalk.gray('   View stats:      ') + chalk.cyan('claude --stats'));
   console.log(chalk.gray('   View config:     ') + chalk.cyan('claude --config'));
+  console.log(chalk.gray('   Web dashboard:   ') + chalk.cyan('claude --serve'));
   console.log(chalk.gray('   Switch storage:  ') + chalk.cyan('~/.claude-reporter/switch-storage.sh'));
-  console.log(chalk.gray('   View reports:    ') + chalk.cyan('~/.claude-reporter/view-reports.sh'));
   console.log(chalk.gray('   Uninstall:       ') + chalk.cyan('~/.claude-reporter/uninstall.sh'));
 
   console.log(chalk.green('\n🚀 Happy coding!\n'));
