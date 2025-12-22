@@ -52,34 +52,270 @@ async function main() {
 
 async function checkPrerequisites() {
   const spinner = ora('Checking prerequisites...').start();
-  
+
   // Check Python
+  let pythonFound = false;
   try {
     execSync('python3 --version', { stdio: 'pipe' });
     spinner.succeed('Python3 found');
+    pythonFound = true;
   } catch (error) {
     spinner.fail('Python3 not found');
-    throw new Error('Please install Python 3 first');
+
+    // Offer to install Python 3
+    const installed = await installPython3();
+    if (!installed) {
+      throw new Error('Python 3 is required. Please install it manually and try again.');
+    }
+    pythonFound = true;
   }
-  
+
   // Check pip
+  let pipFound = false;
   try {
     execSync('pip3 --version', { stdio: 'pipe' });
+    pipFound = true;
   } catch (error) {
     try {
       execSync('pip --version', { stdio: 'pipe' });
+      pipFound = true;
     } catch (error2) {
-      spinner.fail('pip not found');
-      throw new Error('Please install pip first');
+      // pip not found, try to install it
+      console.log(chalk.yellow('\n⚠️  pip not found, attempting to install...'));
+      try {
+        execSync('python3 -m ensurepip --upgrade', { stdio: 'pipe' });
+        pipFound = true;
+        console.log(chalk.green('✅ pip installed successfully'));
+      } catch (pipError) {
+        spinner.fail('pip not found');
+        throw new Error('Please install pip first: python3 -m ensurepip --upgrade');
+      }
     }
   }
-  
-  // Check Claude CLI (optional warning)
+
+  // Check Claude CLI (optional but helpful)
   try {
     execSync('which claude', { stdio: 'pipe' });
     spinner.succeed('Claude CLI found');
   } catch (error) {
-    spinner.warn('Claude CLI not found - you can install it later');
+    spinner.warn('Claude CLI not found');
+    await offerClaudeCliInstall();
+  }
+}
+
+async function offerClaudeCliInstall() {
+  console.log(chalk.yellow('\n⚠️  Claude CLI is not installed.\n'));
+  console.log(chalk.cyan('Claude CLI is the official command-line tool from Anthropic.'));
+  console.log(chalk.cyan('You need it to use this reporter.\n'));
+
+  const platform = os.platform();
+
+  // Show installation options
+  console.log(chalk.bold('Installation options:\n'));
+
+  if (platform === 'darwin' || platform === 'linux') {
+    console.log(chalk.cyan('  Option 1: NPM (Recommended)'));
+    console.log(chalk.gray('    npm install -g @anthropic-ai/claude-code\n'));
+
+    console.log(chalk.cyan('  Option 2: Direct download'));
+    console.log(chalk.gray('    https://docs.anthropic.com/en/docs/claude-code\n'));
+  } else if (platform === 'win32') {
+    console.log(chalk.cyan('  Option 1: NPM'));
+    console.log(chalk.gray('    npm install -g @anthropic-ai/claude-code\n'));
+
+    console.log(chalk.cyan('  Option 2: WSL (Recommended for Windows)'));
+    console.log(chalk.gray('    Install WSL, then use npm install\n'));
+  }
+
+  const { installChoice } = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'installChoice',
+      message: 'What would you like to do?',
+      choices: [
+        { name: '📦 Install Claude CLI now (npm)', value: 'npm' },
+        { name: '⏭️  Skip - I\'ll install it later', value: 'skip' },
+        { name: '✅ I already have it installed elsewhere', value: 'have' }
+      ]
+    }
+  ]);
+
+  if (installChoice === 'npm') {
+    const spinner = ora('Installing Claude CLI via npm...').start();
+
+    try {
+      execSync('npm install -g @anthropic-ai/claude-code', {
+        stdio: 'inherit',
+        timeout: 180000 // 3 minutes
+      });
+      spinner.succeed('Claude CLI installed successfully!');
+
+      // Verify
+      try {
+        const version = execSync('claude --version', { stdio: 'pipe' }).toString().trim();
+        console.log(chalk.green(`   Version: ${version}`));
+      } catch (e) {
+        console.log(chalk.yellow('   Note: You may need to restart your terminal to use claude command.'));
+      }
+    } catch (installError) {
+      spinner.fail('Failed to install Claude CLI');
+      console.log(chalk.yellow('\nPlease install manually:'));
+      console.log(chalk.cyan('  npm install -g @anthropic-ai/claude-code\n'));
+      console.log(chalk.gray('Or visit: https://docs.anthropic.com/en/docs/claude-code'));
+    }
+  } else if (installChoice === 'have') {
+    console.log(chalk.green('\n✅ Great! Make sure it\'s in your PATH.'));
+  } else {
+    console.log(chalk.yellow('\n⚠️  Remember to install Claude CLI before using the reporter.'));
+    console.log(chalk.gray('   npm install -g @anthropic-ai/claude-code\n'));
+  }
+}
+
+async function installPython3() {
+  console.log(chalk.yellow('\n🐍 Python 3 is required but not found.\n'));
+
+  const platform = os.platform();
+
+  // Detect package manager and OS
+  let installMethod = null;
+  let installCommand = null;
+  let manualInstructions = [];
+
+  if (platform === 'darwin') {
+    // macOS
+    try {
+      execSync('which brew', { stdio: 'pipe' });
+      installMethod = 'homebrew';
+      installCommand = 'brew install python3';
+    } catch (e) {
+      manualInstructions = [
+        'Option 1: Install Homebrew first, then Python:',
+        '  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+        '  brew install python3',
+        '',
+        'Option 2: Download from python.org:',
+        '  https://www.python.org/downloads/macos/'
+      ];
+    }
+  } else if (platform === 'linux') {
+    // Linux - detect package manager
+    try {
+      execSync('which apt-get', { stdio: 'pipe' });
+      installMethod = 'apt';
+      installCommand = 'sudo apt-get update && sudo apt-get install -y python3 python3-pip';
+    } catch (e1) {
+      try {
+        execSync('which dnf', { stdio: 'pipe' });
+        installMethod = 'dnf';
+        installCommand = 'sudo dnf install -y python3 python3-pip';
+      } catch (e2) {
+        try {
+          execSync('which yum', { stdio: 'pipe' });
+          installMethod = 'yum';
+          installCommand = 'sudo yum install -y python3 python3-pip';
+        } catch (e3) {
+          try {
+            execSync('which pacman', { stdio: 'pipe' });
+            installMethod = 'pacman';
+            installCommand = 'sudo pacman -S python python-pip';
+          } catch (e4) {
+            manualInstructions = [
+              'Please install Python 3 using your distribution\'s package manager:',
+              '  Ubuntu/Debian: sudo apt-get install python3 python3-pip',
+              '  Fedora: sudo dnf install python3 python3-pip',
+              '  CentOS/RHEL: sudo yum install python3 python3-pip',
+              '  Arch: sudo pacman -S python python-pip'
+            ];
+          }
+        }
+      }
+    }
+  } else if (platform === 'win32') {
+    manualInstructions = [
+      'Please install Python 3 from:',
+      '  https://www.python.org/downloads/windows/',
+      '',
+      'Or using winget:',
+      '  winget install Python.Python.3.12',
+      '',
+      'Or using chocolatey:',
+      '  choco install python'
+    ];
+  }
+
+  // If we can auto-install
+  if (installCommand) {
+    console.log(chalk.cyan(`Detected: ${installMethod}`));
+    console.log(chalk.cyan(`Install command: ${installCommand}\n`));
+
+    const { shouldInstall } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'shouldInstall',
+        message: 'Would you like to install Python 3 now?',
+        default: true
+      }
+    ]);
+
+    if (shouldInstall) {
+      const spinner = ora('Installing Python 3...').start();
+
+      try {
+        execSync(installCommand, {
+          stdio: 'inherit',
+          timeout: 300000 // 5 minutes timeout
+        });
+        spinner.succeed('Python 3 installed successfully!');
+
+        // Verify installation
+        try {
+          execSync('python3 --version', { stdio: 'pipe' });
+          return true;
+        } catch (verifyError) {
+          spinner.warn('Python 3 installed but not in PATH. Please restart your terminal.');
+          return false;
+        }
+      } catch (installError) {
+        spinner.fail('Failed to install Python 3');
+        console.log(chalk.red('\nAutomatic installation failed.'));
+        console.log(chalk.yellow('Please install Python 3 manually:\n'));
+        console.log(chalk.cyan(`  ${installCommand}\n`));
+        return false;
+      }
+    } else {
+      console.log(chalk.yellow('\nPlease install Python 3 manually:'));
+      console.log(chalk.cyan(`  ${installCommand}\n`));
+      return false;
+    }
+  } else {
+    // Show manual instructions
+    console.log(chalk.yellow('Automatic installation not available for your system.\n'));
+    manualInstructions.forEach(line => {
+      console.log(chalk.cyan(line));
+    });
+    console.log('');
+
+    const { installed } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'installed',
+        message: 'Have you installed Python 3? (Press Enter to check again)',
+        default: false
+      }
+    ]);
+
+    if (installed) {
+      try {
+        execSync('python3 --version', { stdio: 'pipe' });
+        console.log(chalk.green('✅ Python 3 detected!'));
+        return true;
+      } catch (e) {
+        console.log(chalk.red('❌ Python 3 still not found. Please install it and try again.'));
+        return false;
+      }
+    }
+
+    return false;
   }
 }
 
@@ -823,19 +1059,19 @@ async function setupShellAlias() {
 
 function createHelperScripts() {
   const spinner = ora('Creating helper scripts...').start();
-  
+
   // View reports script
   const viewScript = `#!/bin/bash
 cd ~/.claude-reporter/reports
 ls -lt | head -20
 `;
-  
+
   fs.writeFileSync(
     path.join(INSTALL_DIR, 'view-reports.sh'),
     viewScript,
     { mode: 0o755 }
   );
-  
+
   // Update webhook script
   const updateWebhook = `#!/bin/bash
 echo "🔗 Update Webhook URL"
@@ -851,13 +1087,126 @@ with open('${CONFIG_FILE}', 'w') as f:
 print("✅ Updated!")
 EOF
 `;
-  
+
   fs.writeFileSync(
     path.join(INSTALL_DIR, 'update-webhook.sh'),
     updateWebhook,
     { mode: 0o755 }
   );
-  
+
+  // Switch storage script
+  const switchStorage = `#!/bin/bash
+CONFIG_FILE="$HOME/.claude-reporter/config.json"
+
+echo ""
+echo "🔄 Switch Storage Backend"
+echo ""
+echo "Current config:"
+cat "$CONFIG_FILE" | python3 -m json.tool 2>/dev/null || cat "$CONFIG_FILE"
+echo ""
+echo "Choose storage type:"
+echo "  1) 📁 Google Drive"
+echo "  2) 🌐 Webhook/HTTP"
+echo "  3) 💾 Local Only"
+echo ""
+read -p "Enter choice [1-3]: " choice
+
+case $choice in
+  1)
+    read -p "Enter Google Drive Folder ID: " FOLDER_ID
+    python3 << EOF
+import json
+with open('$CONFIG_FILE', 'r') as f:
+    config = json.load(f)
+config['storage_type'] = 'gdrive'
+config['gdrive_folder_id'] = '$FOLDER_ID'
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+print("✅ Switched to Google Drive!")
+print("   Folder ID:", '$FOLDER_ID'[:20] + "...")
+EOF
+    ;;
+  2)
+    read -p "Enter Webhook URL: " WEBHOOK_URL
+    python3 << EOF
+import json
+with open('$CONFIG_FILE', 'r') as f:
+    config = json.load(f)
+config['storage_type'] = 'webhook'
+config['report_endpoint'] = '$WEBHOOK_URL'
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+print("✅ Switched to Webhook!")
+print("   URL:", '$WEBHOOK_URL')
+EOF
+    ;;
+  3)
+    python3 << EOF
+import json
+with open('$CONFIG_FILE', 'r') as f:
+    config = json.load(f)
+config['storage_type'] = 'local'
+with open('$CONFIG_FILE', 'w') as f:
+    json.dump(config, f, indent=2)
+print("✅ Switched to Local storage!")
+print("   Reports saved to: ~/.claude-reporter/reports/")
+EOF
+    ;;
+  *)
+    echo "❌ Invalid choice"
+    exit 1
+    ;;
+esac
+
+echo ""
+echo "📄 New config:"
+cat "$CONFIG_FILE" | python3 -m json.tool 2>/dev/null || cat "$CONFIG_FILE"
+`;
+
+  fs.writeFileSync(
+    path.join(INSTALL_DIR, 'switch-storage.sh'),
+    switchStorage,
+    { mode: 0o755 }
+  );
+
+  // Uninstall script
+  const uninstallScript = `#!/bin/bash
+echo ""
+echo "🗑️  Uninstall Claude Reporter"
+echo ""
+read -p "Are you sure you want to uninstall? [y/N]: " confirm
+
+if [[ "$confirm" =~ ^[Yy]$ ]]; then
+  echo ""
+  echo "Removing ~/.claude-reporter..."
+  rm -rf ~/.claude-reporter
+
+  echo "Removing shell alias..."
+  # Remove from .zshrc
+  if [ -f ~/.zshrc ]; then
+    sed -i.bak '/claude-reporter/d' ~/.zshrc 2>/dev/null || sed -i '' '/claude-reporter/d' ~/.zshrc
+    rm -f ~/.zshrc.bak
+  fi
+  # Remove from .bashrc
+  if [ -f ~/.bashrc ]; then
+    sed -i.bak '/claude-reporter/d' ~/.bashrc 2>/dev/null || sed -i '' '/claude-reporter/d' ~/.bashrc
+    rm -f ~/.bashrc.bak
+  fi
+
+  echo ""
+  echo "✅ Uninstalled successfully!"
+  echo "   Please restart your terminal or run: source ~/.zshrc"
+else
+  echo "Cancelled."
+fi
+`;
+
+  fs.writeFileSync(
+    path.join(INSTALL_DIR, 'uninstall.sh'),
+    uninstallScript,
+    { mode: 0o755 }
+  );
+
   spinner.succeed('Helper scripts created');
 }
 
@@ -912,9 +1261,14 @@ function showSuccessMessage(config) {
     console.log(chalk.cyan('💾 Reports → ~/.claude-reporter/reports/'));
   }
   
-  console.log(chalk.gray('\n💡 View history: ') + chalk.cyan('claude --view'));
-  console.log(chalk.gray('💡 Switch storage: ') + chalk.cyan('~/.claude-reporter/switch-storage.sh'));
-  
+  console.log(chalk.gray('\n📋 Useful commands:\n'));
+  console.log(chalk.gray('   View history:    ') + chalk.cyan('claude --view'));
+  console.log(chalk.gray('   View stats:      ') + chalk.cyan('claude --stats'));
+  console.log(chalk.gray('   View config:     ') + chalk.cyan('claude --config'));
+  console.log(chalk.gray('   Switch storage:  ') + chalk.cyan('~/.claude-reporter/switch-storage.sh'));
+  console.log(chalk.gray('   View reports:    ') + chalk.cyan('~/.claude-reporter/view-reports.sh'));
+  console.log(chalk.gray('   Uninstall:       ') + chalk.cyan('~/.claude-reporter/uninstall.sh'));
+
   console.log(chalk.green('\n🚀 Happy coding!\n'));
 }
 
