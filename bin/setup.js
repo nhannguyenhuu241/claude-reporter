@@ -408,37 +408,74 @@ def clean_log(content):
     if not content:
         return ''
 
-    # Remove ANSI escape codes
-    # ESC character is chr(27) or \\x1b
-    # CSI sequences: ESC [ ... letter (most common for colors)
-    content = re.sub(chr(27) + '\\\\[[0-9;?]*[a-zA-Z]', '', content)
+    # Remove ALL ANSI escape sequences comprehensively
+    # CSI sequences: ESC [ ... (most common)
+    content = re.sub(r'\\x1b\\[[0-9;?]*[a-zA-Z]', '', content)
+    content = re.sub(r'\\x1b\\[[0-9;?]*[@-~]', '', content)
 
-    # OSC sequences: ESC ] ... BEL
-    content = re.sub(chr(27) + '\\\\][^' + chr(7) + ']*' + chr(7), '', content)
+    # OSC sequences: ESC ] ... BEL or ESC ] ... ESC \\
+    content = re.sub(r'\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)', '', content)
 
     # Other escape sequences
-    content = re.sub(chr(27) + '[()][AB012]', '', content)
-    content = re.sub(chr(27) + '[@-Z_]', '', content)
+    content = re.sub(r'\\x1b[()][AB012]', '', content)
+    content = re.sub(r'\\x1b[@-Z_]', '', content)
+    content = re.sub(r'\\x1b[78]', '', content)
+    content = re.sub(r'\\x1b[=>]', '', content)
 
     # Remove carriage returns
     content = content.replace('\\r\\n', '\\n')
     content = content.replace('\\r', '')
 
-    # Remove null bytes
-    content = content.replace(chr(0), '')
-
-    # Remove excessive blank lines (more than 2 consecutive)
-    content = re.sub('\\n{3,}', '\\n\\n', content)
-
-    # Remove control characters except newline (10) and tab (9)
+    # Remove null bytes and other control chars
+    content = content.replace('\\x00', '')
     content = ''.join(c for c in content if ord(c) >= 32 or c in '\\n\\t')
 
+    # Remove excessive blank lines
+    content = re.sub(r'\\n{3,}', '\\n\\n', content)
+
     # Clean up script command artifacts
-    content = re.sub('Script started.*\\n', '', content)
-    content = re.sub('Script done.*\\n', '', content)
-    content = re.sub('Command exit status.*\\n', '', content)
+    content = re.sub(r'Script started.*\\n', '', content)
+    content = re.sub(r'Script done.*\\n', '', content)
+    content = re.sub(r'Command exit status.*\\n', '', content)
 
     return content.strip()
+
+def get_claude_conversation(session_start_time):
+    """Try to get conversation from Claude Code's own logs"""
+    import glob
+
+    claude_dir = Path.home() / '.claude'
+    conversations = []
+
+    try:
+        # Look for recent JSONL conversation files
+        projects_dir = claude_dir / 'projects'
+        if projects_dir.exists():
+            # Find all conversation files modified after session start
+            for jsonl_file in projects_dir.rglob('*.jsonl'):
+                try:
+                    mtime = datetime.fromtimestamp(jsonl_file.stat().st_mtime)
+                    if mtime >= session_start_time:
+                        with open(jsonl_file, 'r', encoding='utf-8') as f:
+                            for line in f:
+                                try:
+                                    msg = json.loads(line.strip())
+                                    if msg.get('type') == 'human':
+                                        conversations.append(f"👤 User: {msg.get('message', {}).get('content', '')}")
+                                    elif msg.get('type') == 'assistant':
+                                        content = msg.get('message', {}).get('content', '')
+                                        if isinstance(content, list):
+                                            text_parts = [p.get('text', '') for p in content if p.get('type') == 'text']
+                                            content = '\\n'.join(text_parts)
+                                        conversations.append(f"🤖 Claude: {content[:500]}...")
+                                except:
+                                    pass
+                except:
+                    pass
+    except:
+        pass
+
+    return '\\n\\n'.join(conversations) if conversations else None
 
 class ClaudeReporter:
     def __init__(self):
@@ -518,27 +555,36 @@ class ClaudeReporter:
         """Get session data from database"""
         conn = sqlite3.connect(str(self.db_path))
         cursor = conn.execute(
-            'SELECT * FROM sessions WHERE session_id = ?', 
+            'SELECT * FROM sessions WHERE session_id = ?',
             (session_id,)
         )
         row = cursor.fetchone()
         conn.close()
-        
+
         if not row:
             return None
-        
-        # Read log file
+
+        # Try to get conversation from Claude's own logs first
         log_preview = ''
-        if row[7] and os.path.exists(row[7]):
+        started_at = row[2]
+        try:
+            session_start = datetime.fromisoformat(started_at)
+            claude_conv = get_claude_conversation(session_start)
+            if claude_conv:
+                log_preview = claude_conv[:2000] if len(claude_conv) > 2000 else claude_conv
+        except:
+            pass
+
+        # Fallback to terminal log if no conversation found
+        if not log_preview and row[7] and os.path.exists(row[7]):
             try:
                 with open(row[7], 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read()
-                    # Clean the log content for human readability
                     content = clean_log(content)
                     log_preview = content[:2000] if len(content) > 2000 else content
             except Exception as e:
                 log_preview = f"Error reading log: {e}"
-        
+
         return {
             'session_id': row[1],
             'started_at': row[2],
@@ -824,15 +870,29 @@ class ClaudeReporter:
                 try:
                     data = reporter.get_session_data(session_id)
                     if data:
-                        # Read full log
-                        log_path = reporter.install_dir / 'logs' / f'{session_id}.log'
-                        if log_path.exists():
-                            try:
-                                raw_log = log_path.read_text(encoding='utf-8', errors='replace')
-                                # Clean the log content for human readability
-                                data['full_log'] = clean_log(raw_log)
-                            except:
-                                data['full_log'] = data.get('log_preview', '')
+                        # Try to get full conversation from Claude's logs
+                        full_log = ''
+                        try:
+                            started_at = data.get('started_at', '')
+                            if started_at:
+                                session_start = datetime.fromisoformat(started_at)
+                                claude_conv = get_claude_conversation(session_start)
+                                if claude_conv:
+                                    full_log = claude_conv
+                        except:
+                            pass
+
+                        # Fallback to terminal log
+                        if not full_log:
+                            log_path = reporter.install_dir / 'logs' / f'{session_id}.log'
+                            if log_path.exists():
+                                try:
+                                    raw_log = log_path.read_text(encoding='utf-8', errors='replace')
+                                    full_log = clean_log(raw_log)
+                                except:
+                                    full_log = data.get('log_preview', '')
+
+                        data['full_log'] = full_log
                     return data or {}
                 except Exception as e:
                     print(f"   [Session Error] {e}")
