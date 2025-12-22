@@ -1078,9 +1078,8 @@ class ClaudeReporter:
         return exit_code
 
     def run_with_pty(self, args, log_file):
-        """Run command with PTY to capture all input/output"""
+        """Run command with script to capture all input/output (no fork warnings)"""
         import platform
-        import select
 
         system = platform.system()
 
@@ -1091,113 +1090,30 @@ class ClaudeReporter:
             f.write(f"Working dir: {os.getcwd()}\\n")
             f.write("=" * 50 + "\\n\\n")
 
+        exit_code = 0
+        cmd_str = ' '.join(f'"{a}"' if ' ' in a else a for a in args)
+
         try:
-            import pty
-            import termios
-            import tty
-
-            # Open log file for appending
-            log_fd = os.open(str(log_file), os.O_WRONLY | os.O_APPEND | os.O_CREAT)
-
-            # Create PTY
-            master_fd, slave_fd = pty.openpty()
-
-            # Save terminal settings
-            old_settings = None
-            if sys.stdin.isatty():
-                old_settings = termios.tcgetattr(sys.stdin)
-                tty.setraw(sys.stdin.fileno())
-
-            # Start process
-            pid = os.fork()
-
-            if pid == 0:
-                # Child process
-                os.close(master_fd)
-                os.setsid()
-
-                # Set up slave as controlling terminal
-                os.dup2(slave_fd, 0)
-                os.dup2(slave_fd, 1)
-                os.dup2(slave_fd, 2)
-
-                if slave_fd > 2:
-                    os.close(slave_fd)
-
-                os.execvp(args[0], args)
-
-            else:
-                # Parent process
-                os.close(slave_fd)
-
-                exit_code = 0
-                try:
-                    while True:
-                        r, _, _ = select.select([master_fd, sys.stdin], [], [], 0.1)
-
-                        if master_fd in r:
-                            try:
-                                data = os.read(master_fd, 1024)
-                                if not data:
-                                    break
-                                # Write to stdout and log
-                                os.write(sys.stdout.fileno(), data)
-                                os.write(log_fd, data)
-                            except OSError:
-                                break
-
-                        if sys.stdin.fileno() in r:
-                            try:
-                                data = os.read(sys.stdin.fileno(), 1024)
-                                if data:
-                                    os.write(master_fd, data)
-                                    # Also log user input
-                                    os.write(log_fd, data)
-                            except OSError:
-                                break
-
-                        # Check if child process has exited
-                        pid_result, status = os.waitpid(pid, os.WNOHANG)
-                        if pid_result != 0:
-                            exit_code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
-                            break
-
-                except Exception as e:
-                    print(f"\\n⚠️  PTY error: {e}")
-
-                finally:
-                    # Restore terminal settings
-                    if old_settings:
-                        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-                    os.close(master_fd)
-                    os.close(log_fd)
-
-                    # Make sure child is terminated
-                    try:
-                        os.kill(pid, 0)
-                        _, status = os.waitpid(pid, 0)
-                        exit_code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
-                    except:
-                        pass
-
-        except ImportError:
-            # pty not available (Windows), use script command fallback
-            print("⚠️  PTY not available, using script fallback")
             if system == 'Darwin':
+                # macOS: script -q -a logfile command
                 exit_code = subprocess.call([
                     'script', '-q', '-a', str(log_file),
-                    '/bin/sh', '-c', ' '.join(f'"{a}"' if ' ' in a else a for a in args)
+                    '/bin/sh', '-c', cmd_str
                 ])
             elif system == 'Linux':
+                # Linux: script -q -a logfile -c command
                 exit_code = subprocess.call([
-                    'script', '-q', '-a', str(log_file), '-c',
-                    ' '.join(f'"{a}"' if ' ' in a else a for a in args)
+                    'script', '-q', '-a', str(log_file), '-c', cmd_str
                 ])
             else:
+                # Windows or other - run directly
                 exit_code = subprocess.call(args)
 
+        except FileNotFoundError:
+            # script not found, run directly
+            exit_code = subprocess.call(args)
         except Exception as e:
-            print(f"⚠️  Error: {e}, running without full logging")
+            print(f"⚠️  Error: {e}")
             exit_code = subprocess.call(args)
 
         # Write footer to log file

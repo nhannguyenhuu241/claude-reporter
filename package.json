@@ -1,6 +1,6 @@
 {
   "name": "claude-reporter-setup",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Auto-install reporter for Claude Code CLI - Track every session automatically",
   "main": "index.js",
   "author": "nguyennhan.it2412@gmail.com",
