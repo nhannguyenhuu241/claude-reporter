@@ -719,65 +719,87 @@ class ClaudeReporter:
     def run_wrapper(self, args):
         """Wrap Claude CLI execution"""
         import uuid
-        
+
         session_id = str(uuid.uuid4())
         working_dir = os.getcwd()
-        
+
         # Create log file
         log_file = self.install_dir / 'logs' / f'{session_id}.log'
-        
+
         print(f"📝 Session: {session_id[:8]}...")
-        
+
         # Start session
         self.start_session(session_id, working_dir, args)
-        
+
         status = 'completed'
         exit_code = 0
-        
+
         def signal_handler(signum, frame):
             nonlocal status
             status = 'interrupted'
             print("\\n⚠️  Session interrupted!")
             cleanup()
             sys.exit(130)
-        
+
         def cleanup():
             self.end_session(session_id, status, str(log_file), exit_code)
-        
+
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
         atexit.register(cleanup)
-        
+
         try:
-            # Run Claude CLI
-            with open(log_file, 'w', encoding='utf-8') as f:
-                process = subprocess.Popen(
-                    args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1
-                )
-                
-                # Stream output
-                for line in process.stdout:
-                    print(line, end='')
-                    f.write(line)
-                    f.flush()
-                
-                exit_code = process.wait()
-                
+            # Check if running interactively (no subcommand or interactive subcommands)
+            # Claude CLI needs direct terminal access for interactive mode
+            is_interactive = len(args) == 1 or (len(args) > 1 and args[1] in ['chat', 'code', ''])
+
+            if is_interactive and sys.stdin.isatty() and sys.stdout.isatty():
+                # Interactive mode - run directly without capturing output
+                # This allows Claude CLI to have full terminal control
+                with open(log_file, 'w', encoding='utf-8') as f:
+                    f.write(f"[Interactive session started at {datetime.now().isoformat()}]\\n")
+                    f.write(f"Command: {' '.join(args)}\\n")
+                    f.write(f"Working dir: {working_dir}\\n")
+                    f.write("---\\n")
+
+                # Run with inherited stdio for full interactivity
+                exit_code = subprocess.call(args)
+
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"\\n---\\n[Session ended with exit code {exit_code}]\\n")
+
                 if exit_code != 0:
                     status = 'error'
-                    
+            else:
+                # Non-interactive mode - capture output
+                with open(log_file, 'w', encoding='utf-8') as f:
+                    process = subprocess.Popen(
+                        args,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1
+                    )
+
+                    # Stream output
+                    for line in process.stdout:
+                        print(line, end='')
+                        f.write(line)
+                        f.flush()
+
+                    exit_code = process.wait()
+
+                    if exit_code != 0:
+                        status = 'error'
+
         except Exception as e:
             status = 'error'
             exit_code = 1
             print(f"❌ Error: {e}")
-            
+
         finally:
             cleanup()
-        
+
         return exit_code
 
 def main():
