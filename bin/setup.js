@@ -1040,7 +1040,8 @@ async function setupShellAlias() {
     rcFile = path.join(HOME, '.profile');
   }
   
-  const aliasLine = `\n# Claude Code Auto Reporter\nalias claude='python3 ${INSTALL_DIR}/claude-reporter.py'\n`;
+  // Quote the path to handle spaces in directory names (e.g., "C:\Users\Nguyen Nhan")
+  const aliasLine = `\n# Claude Code Auto Reporter\nalias claude='python3 "${INSTALL_DIR}/claude-reporter.py"'\n`;
   
   // Check if alias already exists
   if (fs.existsSync(rcFile)) {
@@ -1060,9 +1061,9 @@ async function setupShellAlias() {
 function createHelperScripts() {
   const spinner = ora('Creating helper scripts...').start();
 
-  // View reports script
+  // View reports script (use $HOME for paths with spaces)
   const viewScript = `#!/bin/bash
-cd ~/.claude-reporter/reports
+cd "$HOME/.claude-reporter/reports"
 ls -lt | head -20
 `;
 
@@ -1169,7 +1170,7 @@ cat "$CONFIG_FILE" | python3 -m json.tool 2>/dev/null || cat "$CONFIG_FILE"
     { mode: 0o755 }
   );
 
-  // Uninstall script
+  // Uninstall script (use $HOME for paths with spaces)
   const uninstallScript = `#!/bin/bash
 echo ""
 echo "🗑️  Uninstall Claude Reporter"
@@ -1178,19 +1179,19 @@ read -p "Are you sure you want to uninstall? [y/N]: " confirm
 
 if [[ "$confirm" =~ ^[Yy]$ ]]; then
   echo ""
-  echo "Removing ~/.claude-reporter..."
-  rm -rf ~/.claude-reporter
+  echo "Removing $HOME/.claude-reporter..."
+  rm -rf "$HOME/.claude-reporter"
 
   echo "Removing shell alias..."
   # Remove from .zshrc
-  if [ -f ~/.zshrc ]; then
-    sed -i.bak '/claude-reporter/d' ~/.zshrc 2>/dev/null || sed -i '' '/claude-reporter/d' ~/.zshrc
-    rm -f ~/.zshrc.bak
+  if [ -f "$HOME/.zshrc" ]; then
+    sed -i.bak '/claude-reporter/d' "$HOME/.zshrc" 2>/dev/null || sed -i '' '/claude-reporter/d' "$HOME/.zshrc"
+    rm -f "$HOME/.zshrc.bak"
   fi
   # Remove from .bashrc
-  if [ -f ~/.bashrc ]; then
-    sed -i.bak '/claude-reporter/d' ~/.bashrc 2>/dev/null || sed -i '' '/claude-reporter/d' ~/.bashrc
-    rm -f ~/.bashrc.bak
+  if [ -f "$HOME/.bashrc" ]; then
+    sed -i.bak '/claude-reporter/d' "$HOME/.bashrc" 2>/dev/null || sed -i '' '/claude-reporter/d' "$HOME/.bashrc"
+    rm -f "$HOME/.bashrc.bak"
   fi
 
   echo ""
@@ -1212,9 +1213,11 @@ fi
 
 async function testInstallation() {
   const spinner = ora('Testing installation...').start();
-  
+
   try {
-    const testCmd = `python3 ${INSTALL_DIR}/claude-reporter.py --config`;
+    // Quote the path to handle spaces in directory names (e.g., "Nguyen Nhan")
+    const scriptPath = path.join(INSTALL_DIR, 'claude-reporter.py');
+    const testCmd = `python3 "${scriptPath}" --config`;
     execSync(testCmd, { stdio: 'pipe' });
     spinner.succeed('Installation test passed');
   } catch (error) {
