@@ -385,11 +385,21 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-try:
-    import requests
-except ImportError:
-    print("⚠️  'requests' not installed. Run: pip3 install requests")
-    sys.exit(1)
+# Lazy import for requests - only needed when sending reports
+requests = None
+
+def get_requests():
+    """Lazy load requests module"""
+    global requests
+    if requests is None:
+        try:
+            import requests as req
+            requests = req
+        except ImportError:
+            print("⚠️  'requests' not installed. Run: pip3 install requests")
+            print("   Reports will be saved locally only.")
+            return None
+    return requests
 
 class ClaudeReporter:
     def __init__(self):
@@ -522,8 +532,12 @@ class ClaudeReporter:
         elif storage_type == 'webhook':
             endpoint = self.config.get('report_endpoint', '')
             if endpoint:
+                req = get_requests()
+                if not req:
+                    print("⚠️  Cannot send webhook - requests module not installed")
+                    return
                 try:
-                    response = requests.post(
+                    response = req.post(
                         endpoint,
                         json=data,
                         timeout=10,
@@ -659,19 +673,23 @@ class ClaudeReporter:
     
     def send_discord(self, data, webhook):
         """Send Discord webhook notification"""
+        req = get_requests()
+        if not req:
+            return
+
         try:
             status_emoji = {
                 'completed': '✅',
                 'interrupted': '⚠️',
                 'error': '❌'
             }.get(data['status'], '❓')
-            
+
             color = {
                 'completed': 3066993,  # Green
                 'interrupted': 16776960,  # Yellow
                 'error': 15158332  # Red
             }.get(data['status'], 8421504)  # Gray
-            
+
             embed = {
                 "embeds": [{
                     "title": f"{status_emoji} Claude Code Session",
@@ -688,13 +706,13 @@ class ClaudeReporter:
                     "timestamp": datetime.now().isoformat()
                 }]
             }
-            
+
             if data.get('log_preview'):
                 preview = data['log_preview'][:500]
                 embed['embeds'][0]['description'] = f"\`\`\`\\n{preview}\\n\`\`\`"
-            
-            requests.post(webhook, json=embed, timeout=5)
-            
+
+            req.post(webhook, json=embed, timeout=5)
+
         except Exception as e:
             print(f"Discord notification failed: {e}")
     
@@ -1222,7 +1240,23 @@ async function testInstallation() {
     spinner.succeed('Installation test passed');
   } catch (error) {
     spinner.fail('Installation test failed');
-    throw error;
+
+    // Show detailed error for debugging
+    if (error.stderr) {
+      console.log(chalk.red('\nError details:'));
+      console.log(chalk.gray(error.stderr.toString()));
+    }
+    if (error.stdout) {
+      console.log(chalk.gray(error.stdout.toString()));
+    }
+
+    // Common fixes
+    console.log(chalk.yellow('\n💡 Common fixes:'));
+    console.log(chalk.gray('   1. Make sure Python 3 is installed: python3 --version'));
+    console.log(chalk.gray('   2. Install missing dependencies: pip3 install requests psutil'));
+    console.log(chalk.gray('   3. Check the script manually: python3 ~/.claude-reporter/claude-reporter.py --config'));
+
+    throw new Error('Installation test failed. See error details above.');
   }
 }
 
