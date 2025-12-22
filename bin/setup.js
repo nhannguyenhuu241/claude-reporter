@@ -832,28 +832,27 @@ class ClaudeReporter:
             const stats = { total: sessions.length, completed: 0, error: 0, interrupted: 0 };
             sessions.forEach(s => { if (stats[s.status] !== undefined) stats[s.status]++; });
 
-            document.getElementById('stats').innerHTML = \\`
-                <div class="stat-card"><div class="number">\${stats.total}</div><div class="label">Total</div></div>
-                <div class="stat-card"><div class="number" style="color:#22c55e">\${stats.completed}</div><div class="label">Completed</div></div>
-                <div class="stat-card"><div class="number" style="color:#ef4444">\${stats.error}</div><div class="label">Errors</div></div>
-                <div class="stat-card"><div class="number" style="color:#f59e0b">\${stats.interrupted}</div><div class="label">Interrupted</div></div>
-            \\`;
+            document.getElementById('stats').innerHTML =
+                '<div class="stat-card"><div class="number">' + stats.total + '</div><div class="label">Total</div></div>' +
+                '<div class="stat-card"><div class="number" style="color:#22c55e">' + stats.completed + '</div><div class="label">Completed</div></div>' +
+                '<div class="stat-card"><div class="number" style="color:#ef4444">' + stats.error + '</div><div class="label">Errors</div></div>' +
+                '<div class="stat-card"><div class="number" style="color:#f59e0b">' + stats.interrupted + '</div><div class="label">Interrupted</div></div>';
 
             if (sessions.length === 0) {
                 document.getElementById('sessions').innerHTML = '<div class="empty">No sessions yet</div>';
                 return;
             }
 
-            document.getElementById('sessions').innerHTML = sessions.map(s => \\`
-                <div class="session" onclick="location.href='/session/\${s.id}'">
-                    <div class="status \${s.status}"></div>
-                    <div class="session-info">
-                        <div class="session-id">\${s.id.slice(0,8)}...</div>
-                        <div class="session-cmd">\${s.command || s.dir}</div>
-                    </div>
-                    <div class="session-time">\${new Date(s.started).toLocaleString()}</div>
-                </div>
-            \\`).join('');
+            document.getElementById('sessions').innerHTML = sessions.map(function(s) {
+                return '<div class="session" onclick="location.href=\\'/session/' + s.id + '\\'">' +
+                    '<div class="status ' + s.status + '"></div>' +
+                    '<div class="session-info">' +
+                        '<div class="session-id">' + s.id.slice(0,8) + '...</div>' +
+                        '<div class="session-cmd">' + (s.command || s.dir) + '</div>' +
+                    '</div>' +
+                    '<div class="session-time">' + new Date(s.started).toLocaleString() + '</div>' +
+                '</div>';
+            }).join('');
         }
         loadSessions();
         setInterval(loadSessions, 10000);
@@ -910,15 +909,14 @@ class ClaudeReporter:
                 return;
             }}
 
-            document.getElementById('meta').innerHTML = \\`
-                <div class="meta-row"><span class="meta-label">Session ID</span><span class="meta-value">\${{s.session_id}}</span></div>
-                <div class="meta-row"><span class="meta-label">Status</span><span class="status \${{s.status}}">\${{s.status?.toUpperCase()}}</span></div>
-                <div class="meta-row"><span class="meta-label">Started</span><span class="meta-value">\${{s.started_at}}</span></div>
-                <div class="meta-row"><span class="meta-label">Ended</span><span class="meta-value">\${{s.ended_at || 'N/A'}}</span></div>
-                <div class="meta-row"><span class="meta-label">Directory</span><span class="meta-value">\${{s.working_dir}}</span></div>
-                <div class="meta-row"><span class="meta-label">Command</span><span class="meta-value">\${{s.command}}</span></div>
-                <div class="meta-row"><span class="meta-label">Exit Code</span><span class="meta-value">\${{s.exit_code ?? 'N/A'}}</span></div>
-            \\`;
+            document.getElementById('meta').innerHTML =
+                '<div class="meta-row"><span class="meta-label">Session ID</span><span class="meta-value">' + s.session_id + '</span></div>' +
+                '<div class="meta-row"><span class="meta-label">Status</span><span class="status ' + s.status + '">' + (s.status ? s.status.toUpperCase() : '') + '</span></div>' +
+                '<div class="meta-row"><span class="meta-label">Started</span><span class="meta-value">' + s.started_at + '</span></div>' +
+                '<div class="meta-row"><span class="meta-label">Ended</span><span class="meta-value">' + (s.ended_at || 'N/A') + '</span></div>' +
+                '<div class="meta-row"><span class="meta-label">Directory</span><span class="meta-value">' + s.working_dir + '</span></div>' +
+                '<div class="meta-row"><span class="meta-label">Command</span><span class="meta-value">' + s.command + '</span></div>' +
+                '<div class="meta-row"><span class="meta-label">Exit Code</span><span class="meta-value">' + (s.exit_code !== null ? s.exit_code : 'N/A') + '</span></div>';
 
             document.getElementById('log').textContent = s.full_log || s.log_preview || 'No log available';
         }}
