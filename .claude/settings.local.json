@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(npm test)",
-      "Bash(node --check:*)"
+      "Bash(node --check:*)",
+      "Bash(node test.js:*)",
+      "Bash(python3:*)"
     ]
   }
 }

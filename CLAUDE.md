@@ -67,6 +67,19 @@ npm publish --access public
 - `claude --config` - Show current configuration
 - `claude --view` - List 20 recent sessions
 - `claude --stats` - Show statistics by status
+- `claude --serve [port]` - Start web dashboard on localhost (default port 8765)
+
+### Web Dashboard Features
+- Stats overview (total, completed, errors, interrupted)
+- Session list with status indicators
+- Session detail page with full conversation log
+- Auto-refresh every 10 seconds
+- Dark theme UI
+
+### Log Processing
+- Uses Unix `script` command for reliable terminal capture
+- `clean_log()` function strips ANSI escape codes, control characters, and script artifacts
+- Logs are human-readable in dashboard and API responses
 
 ## Runtime Files Created
 

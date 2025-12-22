@@ -401,6 +401,45 @@ def get_requests():
             return None
     return requests
 
+def clean_log(content):
+    """Clean terminal log for human readability"""
+    import re
+
+    if not content:
+        return ''
+
+    # Remove ANSI escape codes
+    # ESC character is chr(27) or \\x1b
+    # CSI sequences: ESC [ ... letter (most common for colors)
+    content = re.sub(chr(27) + '\\\\[[0-9;?]*[a-zA-Z]', '', content)
+
+    # OSC sequences: ESC ] ... BEL
+    content = re.sub(chr(27) + '\\\\][^' + chr(7) + ']*' + chr(7), '', content)
+
+    # Other escape sequences
+    content = re.sub(chr(27) + '[()][AB012]', '', content)
+    content = re.sub(chr(27) + '[@-Z_]', '', content)
+
+    # Remove carriage returns
+    content = content.replace('\\r\\n', '\\n')
+    content = content.replace('\\r', '')
+
+    # Remove null bytes
+    content = content.replace(chr(0), '')
+
+    # Remove excessive blank lines (more than 2 consecutive)
+    content = re.sub('\\n{3,}', '\\n\\n', content)
+
+    # Remove control characters except newline (10) and tab (9)
+    content = ''.join(c for c in content if ord(c) >= 32 or c in '\\n\\t')
+
+    # Clean up script command artifacts
+    content = re.sub('Script started.*\\n', '', content)
+    content = re.sub('Script done.*\\n', '', content)
+    content = re.sub('Command exit status.*\\n', '', content)
+
+    return content.strip()
+
 class ClaudeReporter:
     def __init__(self):
         self.home = Path.home()
@@ -494,6 +533,8 @@ class ClaudeReporter:
             try:
                 with open(row[7], 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read()
+                    # Clean the log content for human readability
+                    content = clean_log(content)
                     log_preview = content[:2000] if len(content) > 2000 else content
             except Exception as e:
                 log_preview = f"Error reading log: {e}"
@@ -726,60 +767,76 @@ class ClaudeReporter:
 
         class ReportHandler(BaseHTTPRequestHandler):
             def log_message(self, format, *args):
-                pass  # Suppress default logging
+                print(f"   [Server] {args[0]}")  # Log requests
 
             def do_GET(self):
                 parsed = urllib.parse.urlparse(self.path)
                 path = parsed.path
 
-                if path == '/' or path == '/index.html':
-                    self.send_html(self.get_dashboard())
-                elif path == '/api/sessions':
-                    self.send_json(self.get_sessions())
-                elif path.startswith('/api/session/'):
-                    session_id = path.split('/')[-1]
-                    self.send_json(self.get_session_detail(session_id))
-                elif path.startswith('/session/'):
-                    session_id = path.split('/')[-1]
-                    self.send_html(self.get_session_page(session_id))
-                else:
-                    self.send_error(404)
+                try:
+                    if path == '/' or path == '/index.html':
+                        self.send_html(self.get_dashboard())
+                    elif path == '/api/sessions':
+                        self.send_json(self.get_sessions())
+                    elif path.startswith('/api/session/'):
+                        session_id = path.split('/')[-1]
+                        self.send_json(self.get_session_detail(session_id))
+                    elif path.startswith('/session/'):
+                        session_id = path.split('/')[-1]
+                        self.send_html(self.get_session_page(session_id))
+                    else:
+                        self.send_error(404)
+                except Exception as e:
+                    print(f"   [Error] {e}")
+                    self.send_error(500, str(e))
 
             def send_html(self, content):
                 self.send_response(200)
                 self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
                 self.wfile.write(content.encode('utf-8'))
 
             def send_json(self, data):
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
-                self.wfile.write(json.dumps(data).encode('utf-8'))
+                self.wfile.write(json.dumps(data, default=str).encode('utf-8'))
 
             def get_sessions(self):
-                conn = sqlite3.connect(str(reporter.db_path))
-                rows = conn.execute('''
-                    SELECT session_id, started_at, ended_at, status, working_dir, command, exit_code
-                    FROM sessions ORDER BY started_at DESC LIMIT 100
-                ''').fetchall()
-                conn.close()
-                return [{
-                    'id': r[0], 'started': r[1], 'ended': r[2],
-                    'status': r[3], 'dir': r[4], 'command': r[5], 'exit_code': r[6]
-                } for r in rows]
+                try:
+                    conn = sqlite3.connect(str(reporter.db_path))
+                    rows = conn.execute('''
+                        SELECT session_id, started_at, ended_at, status, working_dir, command, exit_code
+                        FROM sessions ORDER BY started_at DESC LIMIT 100
+                    ''').fetchall()
+                    conn.close()
+                    return [{
+                        'id': r[0], 'started': r[1], 'ended': r[2],
+                        'status': r[3], 'dir': r[4], 'command': r[5], 'exit_code': r[6]
+                    } for r in rows]
+                except Exception as e:
+                    print(f"   [DB Error] {e}")
+                    return []
 
             def get_session_detail(self, session_id):
-                data = reporter.get_session_data(session_id)
-                if data:
-                    # Read full log
-                    log_path = reporter.install_dir / 'logs' / f'{session_id}.log'
-                    if log_path.exists():
-                        try:
-                            data['full_log'] = log_path.read_text(encoding='utf-8', errors='replace')
-                        except:
-                            data['full_log'] = data.get('log_preview', '')
-                return data or {}
+                try:
+                    data = reporter.get_session_data(session_id)
+                    if data:
+                        # Read full log
+                        log_path = reporter.install_dir / 'logs' / f'{session_id}.log'
+                        if log_path.exists():
+                            try:
+                                raw_log = log_path.read_text(encoding='utf-8', errors='replace')
+                                # Clean the log content for human readability
+                                data['full_log'] = clean_log(raw_log)
+                            except:
+                                data['full_log'] = data.get('log_preview', '')
+                    return data or {}
+                except Exception as e:
+                    print(f"   [Session Error] {e}")
+                    return {}
 
             def get_dashboard(self):
                 return '''<!DOCTYPE html>
@@ -825,34 +882,44 @@ class ClaudeReporter:
         <div class="sessions" id="sessions"><div class="empty">Loading...</div></div>
     </div>
     <script>
+        function goToSession(id) {
+            window.location.href = '/session/' + id;
+        }
+
         async function loadSessions() {
-            const res = await fetch('/api/sessions');
-            const sessions = await res.json();
+            try {
+                var res = await fetch('/api/sessions');
+                var sessions = await res.json();
+                console.log('Loaded sessions:', sessions);
 
-            const stats = { total: sessions.length, completed: 0, error: 0, interrupted: 0 };
-            sessions.forEach(s => { if (stats[s.status] !== undefined) stats[s.status]++; });
+                var stats = { total: sessions.length, completed: 0, error: 0, interrupted: 0 };
+                sessions.forEach(function(s) { if (stats[s.status] !== undefined) stats[s.status]++; });
 
-            document.getElementById('stats').innerHTML =
-                '<div class="stat-card"><div class="number">' + stats.total + '</div><div class="label">Total</div></div>' +
-                '<div class="stat-card"><div class="number" style="color:#22c55e">' + stats.completed + '</div><div class="label">Completed</div></div>' +
-                '<div class="stat-card"><div class="number" style="color:#ef4444">' + stats.error + '</div><div class="label">Errors</div></div>' +
-                '<div class="stat-card"><div class="number" style="color:#f59e0b">' + stats.interrupted + '</div><div class="label">Interrupted</div></div>';
+                document.getElementById('stats').innerHTML =
+                    '<div class="stat-card"><div class="number">' + stats.total + '</div><div class="label">Total</div></div>' +
+                    '<div class="stat-card"><div class="number" style="color:#22c55e">' + stats.completed + '</div><div class="label">Completed</div></div>' +
+                    '<div class="stat-card"><div class="number" style="color:#ef4444">' + stats.error + '</div><div class="label">Errors</div></div>' +
+                    '<div class="stat-card"><div class="number" style="color:#f59e0b">' + stats.interrupted + '</div><div class="label">Interrupted</div></div>';
 
-            if (sessions.length === 0) {
-                document.getElementById('sessions').innerHTML = '<div class="empty">No sessions yet</div>';
-                return;
+                if (sessions.length === 0) {
+                    document.getElementById('sessions').innerHTML = '<div class="empty">No sessions yet. Run some claude commands first!</div>';
+                    return;
+                }
+
+                document.getElementById('sessions').innerHTML = sessions.map(function(s) {
+                    return '<div class="session" onclick="goToSession(\\'' + s.id + '\\')">' +
+                        '<div class="status ' + (s.status || 'unknown') + '"></div>' +
+                        '<div class="session-info">' +
+                            '<div class="session-id">' + (s.id ? s.id.slice(0,8) : 'N/A') + '...</div>' +
+                            '<div class="session-cmd">' + (s.command || s.dir || 'N/A') + '</div>' +
+                        '</div>' +
+                        '<div class="session-time">' + (s.started ? new Date(s.started).toLocaleString() : 'N/A') + '</div>' +
+                    '</div>';
+                }).join('');
+            } catch (err) {
+                console.error('Error loading sessions:', err);
+                document.getElementById('sessions').innerHTML = '<div class="empty">Error loading sessions: ' + err.message + '</div>';
             }
-
-            document.getElementById('sessions').innerHTML = sessions.map(function(s) {
-                return '<div class="session" onclick="location.href=\\'/session/' + s.id + '\\'">' +
-                    '<div class="status ' + s.status + '"></div>' +
-                    '<div class="session-info">' +
-                        '<div class="session-id">' + s.id.slice(0,8) + '...</div>' +
-                        '<div class="session-cmd">' + (s.command || s.dir) + '</div>' +
-                    '</div>' +
-                    '<div class="session-time">' + new Date(s.started).toLocaleString() + '</div>' +
-                '</div>';
-            }).join('');
         }
         loadSessions();
         setInterval(loadSessions, 10000);
@@ -1011,111 +1078,138 @@ class ClaudeReporter:
         return exit_code
 
     def run_with_pty(self, args, log_file):
-        """Run command with PTY to capture interactive output"""
+        """Run command with PTY to capture all input/output"""
+        import platform
         import select
 
-        # Try to use pty module (Unix only)
+        system = platform.system()
+
+        # Write header to log file
+        with open(log_file, 'w', encoding='utf-8') as f:
+            f.write(f"[Session started at {datetime.now().isoformat()}]\\n")
+            f.write(f"Command: {' '.join(args)}\\n")
+            f.write(f"Working dir: {os.getcwd()}\\n")
+            f.write("=" * 50 + "\\n\\n")
+
         try:
             import pty
-            import tty
             import termios
+            import tty
 
-            # Save original terminal settings
-            old_settings = termios.tcgetattr(sys.stdin)
+            # Open log file for appending
+            log_fd = os.open(str(log_file), os.O_WRONLY | os.O_APPEND | os.O_CREAT)
 
+            # Create PTY
             master_fd, slave_fd = pty.openpty()
 
-            try:
-                # Start the process with PTY
-                process = subprocess.Popen(
-                    args,
-                    stdin=slave_fd,
-                    stdout=slave_fd,
-                    stderr=slave_fd,
-                    close_fds=True
-                )
-                os.close(slave_fd)
-
-                # Set terminal to raw mode
+            # Save terminal settings
+            old_settings = None
+            if sys.stdin.isatty():
+                old_settings = termios.tcgetattr(sys.stdin)
                 tty.setraw(sys.stdin.fileno())
 
-                with open(log_file, 'w', encoding='utf-8', errors='replace') as f:
-                    f.write(f"[Session started at {datetime.now().isoformat()}]\\n")
-                    f.write(f"Command: {' '.join(args)}\\n")
-                    f.write(f"Working dir: {os.getcwd()}\\n")
-                    f.write("=" * 50 + "\\n\\n")
+            # Start process
+            pid = os.fork()
 
-                    while process.poll() is None:
-                        # Check if there's data to read from master or stdin
-                        rlist, _, _ = select.select([master_fd, sys.stdin], [], [], 0.1)
+            if pid == 0:
+                # Child process
+                os.close(master_fd)
+                os.setsid()
 
-                        for fd in rlist:
-                            if fd == master_fd:
-                                # Data from the process
-                                try:
-                                    data = os.read(master_fd, 1024)
-                                    if data:
-                                        # Write to terminal
-                                        os.write(sys.stdout.fileno(), data)
-                                        # Write to log file
-                                        try:
-                                            f.write(data.decode('utf-8', errors='replace'))
-                                            f.flush()
-                                        except:
-                                            pass
-                                except OSError:
-                                    break
+                # Set up slave as controlling terminal
+                os.dup2(slave_fd, 0)
+                os.dup2(slave_fd, 1)
+                os.dup2(slave_fd, 2)
 
-                            elif fd == sys.stdin:
-                                # Data from user input
-                                try:
-                                    data = os.read(sys.stdin.fileno(), 1024)
-                                    if data:
-                                        os.write(master_fd, data)
-                                except OSError:
-                                    break
+                if slave_fd > 2:
+                    os.close(slave_fd)
 
-                    # Read any remaining output
-                    try:
-                        while True:
-                            rlist, _, _ = select.select([master_fd], [], [], 0.1)
-                            if not rlist:
-                                break
-                            data = os.read(master_fd, 1024)
-                            if not data:
-                                break
-                            os.write(sys.stdout.fileno(), data)
+                os.execvp(args[0], args)
+
+            else:
+                # Parent process
+                os.close(slave_fd)
+
+                exit_code = 0
+                try:
+                    while True:
+                        r, _, _ = select.select([master_fd, sys.stdin], [], [], 0.1)
+
+                        if master_fd in r:
                             try:
-                                f.write(data.decode('utf-8', errors='replace'))
-                            except:
-                                pass
+                                data = os.read(master_fd, 1024)
+                                if not data:
+                                    break
+                                # Write to stdout and log
+                                os.write(sys.stdout.fileno(), data)
+                                os.write(log_fd, data)
+                            except OSError:
+                                break
+
+                        if sys.stdin.fileno() in r:
+                            try:
+                                data = os.read(sys.stdin.fileno(), 1024)
+                                if data:
+                                    os.write(master_fd, data)
+                                    # Also log user input
+                                    os.write(log_fd, data)
+                            except OSError:
+                                break
+
+                        # Check if child process has exited
+                        pid_result, status = os.waitpid(pid, os.WNOHANG)
+                        if pid_result != 0:
+                            exit_code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
+                            break
+
+                except Exception as e:
+                    print(f"\\n⚠️  PTY error: {e}")
+
+                finally:
+                    # Restore terminal settings
+                    if old_settings:
+                        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                    os.close(master_fd)
+                    os.close(log_fd)
+
+                    # Make sure child is terminated
+                    try:
+                        os.kill(pid, 0)
+                        _, status = os.waitpid(pid, 0)
+                        exit_code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
                     except:
                         pass
 
-                    f.write("\\n\\n" + "=" * 50 + "\\n")
-                    f.write(f"[Session ended at {datetime.now().isoformat()}]\\n")
-
-                os.close(master_fd)
-                return process.returncode or 0
-
-            finally:
-                # Restore terminal settings
-                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-
         except ImportError:
-            # PTY not available (Windows) - fall back to direct execution
-            print("⚠️  PTY not available, logs may be limited")
-            with open(log_file, 'w', encoding='utf-8') as f:
-                f.write(f"[Interactive session - PTY not available]\\n")
-                f.write(f"Command: {' '.join(args)}\\n")
-                f.write(f"Working dir: {os.getcwd()}\\n")
-
-            return subprocess.call(args)
+            # pty not available (Windows), use script command fallback
+            print("⚠️  PTY not available, using script fallback")
+            if system == 'Darwin':
+                exit_code = subprocess.call([
+                    'script', '-q', '-a', str(log_file),
+                    '/bin/sh', '-c', ' '.join(f'"{a}"' if ' ' in a else a for a in args)
+                ])
+            elif system == 'Linux':
+                exit_code = subprocess.call([
+                    'script', '-q', '-a', str(log_file), '-c',
+                    ' '.join(f'"{a}"' if ' ' in a else a for a in args)
+                ])
+            else:
+                exit_code = subprocess.call(args)
 
         except Exception as e:
-            # Fallback if PTY fails
-            print(f"⚠️  PTY error: {e}, running without logging")
-            return subprocess.call(args)
+            print(f"⚠️  Error: {e}, running without full logging")
+            exit_code = subprocess.call(args)
+
+        # Write footer to log file
+        try:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write("\\n\\n" + "=" * 50 + "\\n")
+                f.write(f"[Session ended at {datetime.now().isoformat()}]\\n")
+                f.write(f"Exit code: {exit_code}\\n")
+        except:
+            pass
+
+        return exit_code
 
 def main():
     reporter = ClaudeReporter()
