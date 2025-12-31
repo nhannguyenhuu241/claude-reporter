@@ -5,14 +5,13 @@ import os
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar, Dict, List, Optional, Tuple, cast
+from typing import ClassVar, Dict, List, Optional, cast
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
     Button,
-    Checkbox,
     DataTable,
     Footer,
     Header,
@@ -33,75 +32,6 @@ from textual.worker import Worker, get_current_worker
 from .cache import CacheManager, SessionCacheData, get_library_version
 from .converter import ensure_fresh_cache
 from .renderer import get_project_display_name
-
-
-def discover_projects_with_sessions(projects_dir: Path) -> List[Dict]:
-    """Discover all projects with non-empty sessions.
-
-    Returns a list of dicts with project info.
-    """
-    projects = []
-
-    if not projects_dir.exists():
-        return projects
-
-    for project_dir in sorted(projects_dir.iterdir()):
-        if not project_dir.is_dir():
-            continue
-
-        if project_dir.name.startswith("."):
-            continue
-
-        jsonl_files = list(project_dir.glob("*.jsonl"))
-        non_empty_files = [f for f in jsonl_files if f.stat().st_size > 0]
-
-        if not non_empty_files:
-            continue
-
-        session_count = len(non_empty_files)
-        message_count = 0
-        last_modified = None
-
-        try:
-            cache_manager = CacheManager(project_dir, get_library_version())
-            project_cache = cache_manager.get_cached_project_data()
-
-            if project_cache and project_cache.sessions:
-                non_empty_sessions = [
-                    s for s in project_cache.sessions.values() if s.message_count > 0
-                ]
-                session_count = len(non_empty_sessions)
-                message_count = sum(s.message_count for s in non_empty_sessions)
-
-                if project_cache.latest_timestamp:
-                    try:
-                        dt = datetime.fromisoformat(
-                            project_cache.latest_timestamp.replace("Z", "+00:00")
-                        )
-                        last_modified = dt.strftime("%Y-%m-%d %H:%M")
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        if not last_modified and non_empty_files:
-            latest_mtime = max(f.stat().st_mtime for f in non_empty_files)
-            last_modified = datetime.fromtimestamp(latest_mtime).strftime(
-                "%Y-%m-%d %H:%M"
-            )
-
-        projects.append(
-            {
-                "path": project_dir,
-                "name": project_dir.name,
-                "session_count": session_count,
-                "message_count": message_count,
-                "last_modified": last_modified or "Unknown",
-            }
-        )
-
-    projects.sort(key=lambda p: p["last_modified"], reverse=True)
-    return projects
 
 
 class ProjectSelector(App[Path]):
@@ -360,10 +290,7 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         super().__init__()
         self.theme = "gruvbox"
         self.project_path = project_path
-        self.projects_dir = Path.home() / ".claude" / "projects"
         self.sessions: Dict[str, SessionCacheData] = {}
-        self.project_checkboxes: Dict[str, Checkbox] = {}
-        self.available_projects: List[Dict] = []
 
     def compose(self) -> ComposeResult:
         """Create the UI layout."""
@@ -384,23 +311,12 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             # Mode Selection
             yield Label("Mode", classes="section-title")
             with RadioSet(id="mode-selection"):
-                yield RadioButton("All Projects", id="mode-all", value=True)
-                yield RadioButton("Directory", id="mode-dir")
+                yield RadioButton("Directory", id="mode-dir", value=True)
                 yield RadioButton("Single File", id="mode-file")
 
-            # Project Selection (for All Projects mode)
-            yield Label("Select Projects", classes="section-title", id="projects-label")
+            # Input Path
+            yield Label("Input Path", classes="section-title")
             with Horizontal(classes="form-row"):
-                yield Button("Select All", id="btn-select-all", variant="default")
-                yield Button("Deselect All", id="btn-deselect-all", variant="default")
-                yield Button("Refresh", id="btn-refresh-projects", variant="primary")
-
-            with VerticalScroll(id="project-list"):
-                yield Static("Loading projects...", id="projects-loading")
-
-            # Input Path (for Directory/File modes)
-            yield Label("Input Path", classes="section-title", id="input-label")
-            with Horizontal(classes="form-row", id="input-row"):
                 yield Input(
                     placeholder="Path to directory or file...",
                     id="input-path",
@@ -455,117 +371,17 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
 
     def on_mount(self) -> None:
         """Initialize the application when mounted."""
-        self._update_mode_visibility()
-        self.refresh_projects()
-
         if self.project_path:
             self.load_sessions()
-
-    def _update_mode_visibility(self) -> None:
-        """Update visibility of UI elements based on selected mode."""
-        try:
-            radio_set = self.query_one("#mode-selection", RadioSet)
-            mode = "all"
-            if radio_set.pressed_index == 1:
-                mode = "dir"
-            elif radio_set.pressed_index == 2:
-                mode = "file"
-
-            # Show/hide project list
-            projects_label = self.query_one("#projects-label", Label)
-            project_list = self.query_one("#project-list", VerticalScroll)
-            btn_select_all = self.query_one("#btn-select-all", Button)
-            btn_deselect_all = self.query_one("#btn-deselect-all", Button)
-            btn_refresh = self.query_one("#btn-refresh-projects", Button)
-
-            # Show/hide input path
-            input_label = self.query_one("#input-label", Label)
-            input_row = self.query_one("#input-row", Horizontal)
-
-            if mode == "all":
-                projects_label.display = True
-                project_list.display = True
-                btn_select_all.display = True
-                btn_deselect_all.display = True
-                btn_refresh.display = True
-                input_label.display = False
-                input_row.display = False
-            else:
-                projects_label.display = False
-                project_list.display = False
-                btn_select_all.display = False
-                btn_deselect_all.display = False
-                btn_refresh.display = False
-                input_label.display = True
-                input_row.display = True
-
-        except Exception:
-            pass
-
-    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
-        """Handle mode selection change."""
-        self._update_mode_visibility()
-
-    def refresh_projects(self) -> None:
-        """Discover and populate project list."""
-        self.log_message("Discovering projects...")
-
-        self.available_projects = discover_projects_with_sessions(self.projects_dir)
-
-        try:
-            project_list = self.query_one("#project-list", VerticalScroll)
-            project_list.remove_children()
-            self.project_checkboxes.clear()
-
-            if not self.available_projects:
-                project_list.mount(
-                    Static("No projects with sessions found in ~/.claude/projects/")
-                )
-                self.log_message("No projects found.")
-                return
-
-            for project in self.available_projects:
-                info_text = (
-                    f"{project['name']} "
-                    f"({project['session_count']} sessions, "
-                    f"{project['message_count']} msgs, "
-                    f"{project['last_modified']})"
-                )
-                checkbox = Checkbox(info_text, value=False, id=f"proj-{project['name']}")
-                self.project_checkboxes[project["name"]] = checkbox
-                project_list.mount(checkbox)
-
-            self.log_message(f"Found {len(self.available_projects)} projects.")
-
-        except Exception as e:
-            self.log_message(f"Error loading projects: {e}")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
         button_id = event.button.id
 
-        if button_id == "btn-select-all":
-            self.select_all_projects()
-        elif button_id == "btn-deselect-all":
-            self.deselect_all_projects()
-        elif button_id == "btn-refresh-projects":
-            self.refresh_projects()
-        elif button_id == "btn-convert":
+        if button_id == "btn-convert":
             self.action_convert()
         elif button_id == "btn-clear-log":
             self.clear_log()
-
-    def select_all_projects(self) -> None:
-        """Select all project checkboxes."""
-        for checkbox in self.project_checkboxes.values():
-            checkbox.value = True
-        self.log_message(f"Selected all {len(self.project_checkboxes)} projects.")
-
-    def deselect_all_projects(self) -> None:
-        """Deselect all project checkboxes."""
-        for checkbox in self.project_checkboxes.values():
-            checkbox.value = False
-        self.log_message("Deselected all projects.")
 
     def clear_log(self) -> None:
         """Clear the status log."""
@@ -584,15 +400,6 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         except Exception:
             pass
 
-    def get_selected_projects(self) -> List[Path]:
-        """Get list of selected project paths."""
-        selected = []
-        for project in self.available_projects:
-            checkbox = self.project_checkboxes.get(project["name"])
-            if checkbox and checkbox.value:
-                selected.append(project["path"])
-        return selected
-
     def action_convert(self) -> None:
         """Start the conversion process."""
         if self.is_converting:
@@ -607,11 +414,7 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         try:
             # Get settings
             radio_set = self.query_one("#mode-selection", RadioSet)
-            mode = "all"
-            if radio_set.pressed_index == 1:
-                mode = "dir"
-            elif radio_set.pressed_index == 2:
-                mode = "file"
+            mode = "dir" if radio_set.pressed_index == 0 else "file"
 
             from_date = self.query_one("#from-date", Input).value or None
             to_date = self.query_one("#to-date", Input).value or None
@@ -626,104 +429,49 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             progress = self.query_one("#progress-bar", ProgressBar)
             progress.update(progress=0)
 
-            # Import converter functions
-            from .converter import (
-                convert_jsonl_to_html,
-                process_projects_hierarchy,
-                process_selected_projects,
+            # Import converter function
+            from .converter import convert_jsonl_to_html
+
+            # Get input path
+            input_path = self.query_one("#input-path", Input).value
+
+            if not input_path:
+                self.log_message("Error: No input path specified.")
+                return
+
+            input_path = Path(input_path).expanduser()
+
+            if not input_path.exists():
+                self.log_message(f"Error: Path does not exist: {input_path}")
+                return
+
+            self.log_message(f"Processing: {input_path}")
+
+            if clear_cache:
+                cache_dir = input_path / "cache" if input_path.is_dir() else None
+                if cache_dir and cache_dir.exists():
+                    import shutil
+
+                    shutil.rmtree(cache_dir)
+                    self.log_message("Cache cleared.")
+
+            output_file = Path(output_path) if output_path else None
+
+            result = convert_jsonl_to_html(
+                input_path=input_path,
+                output_path=output_file,
+                from_date=from_date,
+                to_date=to_date,
+                no_individual_sessions=skip_sessions,
             )
 
-            if mode == "all":
-                selected_projects = self.get_selected_projects()
+            progress.update(progress=100)
 
-                if not selected_projects:
-                    self.log_message("No projects selected. Selecting all...")
-                    selected_projects = [p["path"] for p in self.available_projects]
-
-                self.log_message(f"Processing {len(selected_projects)} projects...")
-
-                if clear_cache:
-                    self.log_message("Clearing cache...")
-                    for project_path in selected_projects:
-                        cache_dir = project_path / "cache"
-                        if cache_dir.exists():
-                            import shutil
-
-                            shutil.rmtree(cache_dir)
-
-                # Process projects
-                output_dir = Path(output_path) if output_path else None
-
-                if len(selected_projects) == len(self.available_projects):
-                    # Process all projects
-                    result = process_projects_hierarchy(
-                        projects_dir=self.projects_dir,
-                        output_dir=output_dir,
-                        from_date=from_date,
-                        to_date=to_date,
-                        no_individual_sessions=skip_sessions,
-                    )
-                else:
-                    # Process selected projects only
-                    result = process_selected_projects(
-                        project_paths=selected_projects,
-                        output_dir=output_dir,
-                        from_date=from_date,
-                        to_date=to_date,
-                        no_individual_sessions=skip_sessions,
-                    )
-
-                progress.update(progress=100)
-
-                if result:
-                    self.log_message(f"Conversion complete: {result}")
-                    if open_browser and result.exists():
-                        webbrowser.open(f"file://{result}")
-                        self.log_message("Opened in browser.")
-                else:
-                    self.log_message("Conversion complete.")
-
-            else:
-                # Directory or File mode
-                input_path = self.query_one("#input-path", Input).value
-
-                if not input_path:
-                    self.log_message("Error: No input path specified.")
-                    return
-
-                input_path = Path(input_path).expanduser()
-
-                if not input_path.exists():
-                    self.log_message(f"Error: Path does not exist: {input_path}")
-                    return
-
-                self.log_message(f"Processing: {input_path}")
-
-                if clear_cache:
-                    cache_dir = input_path / "cache" if input_path.is_dir() else None
-                    if cache_dir and cache_dir.exists():
-                        import shutil
-
-                        shutil.rmtree(cache_dir)
-                        self.log_message("Cache cleared.")
-
-                output_file = Path(output_path) if output_path else None
-
-                result = convert_jsonl_to_html(
-                    input_path=input_path,
-                    output_path=output_file,
-                    from_date=from_date,
-                    to_date=to_date,
-                    no_individual_sessions=skip_sessions,
-                )
-
-                progress.update(progress=100)
-
-                if result:
-                    self.log_message(f"Conversion complete: {result}")
-                    if open_browser:
-                        webbrowser.open(f"file://{result}")
-                        self.log_message("Opened in browser.")
+            if result:
+                self.log_message(f"Conversion complete: {result}")
+                if open_browser:
+                    webbrowser.open(f"file://{result}")
+                    self.log_message("Opened in browser.")
 
         except Exception as e:
             self.log_message(f"Error: {e}")
@@ -940,8 +688,7 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             self.notify(f"Error resuming session: {e}", severity="error")
 
     def action_refresh(self) -> None:
-        """Refresh projects and sessions."""
-        self.refresh_projects()
+        """Refresh sessions."""
         if self.project_path:
             self.load_sessions()
         self.notify("Refreshed")
@@ -1009,10 +756,10 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         help_text = (
             "Claude Code Log TUI\n\n"
             "Converter Tab:\n"
-            "- Select mode: All Projects, Directory, or Single File\n"
-            "- Select projects to convert\n"
+            "- Select mode: Directory or Single File\n"
+            "- Enter input path\n"
             "- Set date filters and options\n"
-            "- Press Ctrl+C or click Convert button\n\n"
+            "- Click Convert button\n\n"
             "Sessions Tab:\n"
             "- h: Open selected session HTML\n"
             "- c: Resume session in Claude Code\n"
