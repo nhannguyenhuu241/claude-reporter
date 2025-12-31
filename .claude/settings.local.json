@@ -4,7 +4,16 @@
       "Bash(npm test)",
       "Bash(node --check:*)",
       "Bash(node test.js:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(npm whoami:*)",
+      "Bash(npm login)",
+      "Bash(npm publish:*)",
+      "Bash(npm view:*)",
+      "Bash(uv run python:*)",
+      "Bash(uv run pytest:*)",
+      "Bash(node bin/cli.js:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nfeat: Enhanced TUI with full converter functionality\n\n- Add tabbed interface with Converter and Sessions tabs\n- Add mode selection \\(All Projects, Directory, Single File\\)\n- Add project checkboxes with Select All/Deselect All\n- Add date filtering \\(from-date, to-date\\) inputs\n- Add output directory input\n- Add options switches \\(open browser, skip sessions, clear cache\\)\n- Add Convert button with progress bar and status log\n- Filter GitHub URL and build messages from npm cli output\n- Bump version to 0.9.0\nEOF\n\\)\")"
     ]
   }
 }

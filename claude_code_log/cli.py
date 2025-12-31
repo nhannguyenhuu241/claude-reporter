@@ -55,9 +55,9 @@ def _launch_tui_with_cache_check(project_path: Path) -> Optional[str]:
 
     time.sleep(0.5)
 
-    from .tui import run_session_browser
+    from .tui import run_tui
 
-    result = run_session_browser(project_path)
+    result = run_tui(project_path)
     return result
 
 
