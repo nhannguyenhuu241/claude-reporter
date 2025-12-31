@@ -1,385 +1,395 @@
-# 🚀 Claude Code Auto Reporter
+# Claude Code Log
 
-Tự động track mọi Claude Code session. Cài 1 lần, dùng mãi mãi.
+A Python CLI tool that converts Claude Code transcript JSONL files into readable HTML format.
 
-## ⚡ Quick Start
+Browser log demo:
+
+[Browser log](https://github.com/user-attachments/assets/12d94faf-6901-4429-b4e6-ea5f102d0c1c)
+
+TUI demo:
+
+[TUI](https://github.com/user-attachments/assets/75718e2b-3b02-4e17-8f3d-366e2c40dcc2)
+
+## Project Overview
+
+📋 **[View Changelog](CHANGELOG.md)** - See what's new in each release
+
+This tool generates clean, minimalist HTML pages showing user prompts and assistant responses chronologically. It's designed to create a readable log of your Claude Code interactions with support for both individual files and entire project hierarchies.
+
+📄 **[View Example HTML Output](https://github.com/daaain/claude-code-log/releases/latest/download/claude-code-log-transcript.html)** - Download a real example generated from this project's development (large file, ~100 MB)
+
+## Quickstart
+
+TL;DR: run the command below and browse the pages generated from your entire Claude Code archives:
+
+```sh
+uvx claude-code-log@latest --open-browser
+```
+
+## Key Features
+
+- **Interactive TUI (Terminal User Interface)**: Browse and manage Claude Code sessions with real-time navigation, summaries, and quick actions for HTML export and session resuming
+- **Project Hierarchy Processing**: Process entire `~/.claude/projects/` directory with linked index page
+- **Individual Session Files**: Generate separate HTML files for each session with navigation links
+- **Single File or Directory Processing**: Convert individual JSONL files or specific directories
+- **Session Navigation**: Interactive table of contents with session summaries and quick navigation
+- **Token Usage Tracking**: Display token consumption for individual messages and session totals
+- **Runtime Message Filtering**: JavaScript-powered filtering to show/hide message types (user, assistant, system, tool use, etc.)
+- **Chronological Ordering**: All messages sorted by timestamp across sessions
+- **Interactive timeline**: Generate an interactive, zoomable timeline grouped by message times to navigate conversations visually
+- **Cross-Session Summary Matching**: Properly match async-generated summaries to their original sessions
+- **Date Range Filtering**: Filter messages by date range using natural language (e.g., "today", "yesterday", "last week")
+- **Rich Message Types**: Support for user/assistant messages, tool use/results, thinking content, images
+- **System Command Visibility**: Show system commands (like `init`) in expandable details with structured parsing
+- **Markdown Rendering**: Server-side markdown rendering with syntax highlighting using mistune
+- **Floating Navigation**: Always-available back-to-top button and filter controls
+- **CLI Interface**: Simple command-line tool using Click
+
+## What Problems Does This Solve?
+
+This tool helps you answer questions like:
+
+- **"How can I review all my Claude Code conversations?"**
+- **"What did I work on with Claude yesterday/last week?"**
+- **"How much are my Claude Code sessions costing?"**
+- **"How can I search through my entire Claude Code history?"**
+- **"What tools did Claude use in this project?"**
+- **"How can I share my Claude Code conversation with others?"**
+- **"What's the timeline of my project development?"**
+- **"How can I analyse patterns in my Claude Code usage?"**
+
+## Usage
+
+### Interactive TUI (Terminal User Interface)
+
+The TUI provides an interactive interface for browsing and managing Claude Code sessions with real-time navigation, session summaries, and quick actions.
 
 ```bash
-npx claude-reporter-setup
+# Launch TUI for all projects (default behavior)
+claude-code-log --tui
+
+# Launch TUI for specific project directory
+claude-code-log /path/to/project --tui
+
+# Launch TUI for specific Claude project
+claude-code-log my-project --tui  # Automatically converts to ~/.claude/projects/-path-to-my-project
 ```
 
-**Xong!** Mở terminal mới, dùng `claude` như bình thường.
+**TUI Features:**
 
-→ Mọi session tự động được lưu. Zero effort. Zero maintenance.
+- **Session Listing**: Interactive table showing session IDs, summaries, timestamps, message counts, and token usage
+- **Smart Summaries**: Prioritizes Claude-generated summaries over first user messages for better session identification
+- **Working Directory Matching**: Automatically finds and opens projects matching your current working directory
+- **Quick Actions**:
+  - `h` or "Export to HTML" button: Generate and open session HTML in browser
+  - `c` or "Resume in Claude Code" button: Continue session with `claude -r <sessionId>`
+  - `r` or "Refresh" button: Reload session data from files
+  - `p` or "Projects View" button: Switch to project selector view
+- **Project Statistics**: Real-time display of total sessions, messages, tokens, and date range
+- **Cache Integration**: Leverages existing cache system for fast loading with automatic cache validation
+- **Keyboard Navigation**: Arrow keys to navigate, Enter to expand row details, `q` to quit
+- **Row Expansion**: Press Enter to expand selected row showing full summary, first user message, working directory, and detailed token usage
 
-## ✨ Features
-
-### Multiple Storage Options
-- 📁 **Google Drive** - Auto-upload reports to your Google Drive
-- 🌐 **Webhook/HTTP** - Send to any custom endpoint
-- 💾 **Local Storage** - Keep everything on your machine
-- 🏢 **Enterprise** - Contact sales for advanced integrations
-
-### Auto-Tracking
-- ✅ Mọi `claude` command được track
-- ✅ Bắt Ctrl+C, kill, crash
-- ✅ Lưu full logs
-- ✅ SQLite database
-
-### Reporting
-- ✅ Multiple destinations (Drive, Webhook, Local)
-- ✅ Discord notifications
-- ✅ JSON format
-- ✅ Realtime streaming
-
-### Configuration
-- ✅ Interactive setup wizard
-- ✅ Multiple storage backends
-- ✅ Easy switching between backends
-- ✅ Helper scripts
-
-## 📦 Installation
-
-### Cách 1: NPX (Recommended)
+### Default Behavior (Process All Projects)
 
 ```bash
-npx claude-reporter-setup
+# Process all projects in ~/.claude/projects/ (default behavior)
+claude-code-log
+
+# Explicitly process all projects
+claude-code-log --all-projects
+
+# Process all projects and open in browser
+claude-code-log --open-browser
+
+# Process all projects with date filtering  
+claude-code-log --from-date "yesterday" --to-date "today"
+claude-code-log --from-date "last week"
+
+# Skip individual session files (only create combined transcripts)
+claude-code-log --no-individual-sessions
 ```
 
-### Cách 2: Global Install
+This creates:
+
+- `~/.claude/projects/index.html` - Top level index with project cards and statistics
+- `~/.claude/projects/project-name/combined_transcripts.html` - Individual project pages (these can be several megabytes)
+- `~/.claude/projects/project-name/session-{session-id}.html` - Individual session pages
+
+### Single File or Directory Processing
 
 ```bash
-npm install -g claude-reporter-setup
-claude-reporter-setup
+# Single file
+claude-code-log transcript.jsonl
+
+# Specific directory
+claude-code-log /path/to/transcript/directory
+
+# Custom output location
+claude-code-log /path/to/directory -o combined_transcripts.html
+
+# Open in browser after conversion
+claude-code-log /path/to/directory --open-browser
+
+# Filter by date range (supports natural language)
+claude-code-log /path/to/directory --from-date "yesterday" --to-date "today"
+claude-code-log /path/to/directory --from-date "3 days ago" --to-date "yesterday"
 ```
 
-### Cách 3: Manual
+## File Structure
+
+- `claude_code_log/parser.py` - Data extraction and parsing from JSONL files
+- `claude_code_log/renderer.py` - HTML generation and template rendering
+- `claude_code_log/converter.py` - High-level conversion orchestration
+- `claude_code_log/cli.py` - Command-line interface with project discovery
+- `claude_code_log/models.py` - Pydantic models for transcript data structures
+- `claude_code_log/templates/` - Jinja2 HTML templates
+  - `transcript.html` - Main transcript viewer template
+  - `index.html` - Project directory index template
+- `pyproject.toml` - Project configuration with dependencies
+
+## Development
+
+The project uses:
+
+- Python 3.10+ with uv package management
+- Click for CLI interface and argument parsing
+- Pydantic for robust data modeling and validation
+- dateparser for natural language date parsing
+- Standard library for JSON/HTML processing
+- Minimal dependencies for portability
+- mistune for quick Markdown rendering
+
+## Development Commands
+
+### Testing
+
+The project uses a categorized test system to avoid async event loop conflicts between different testing frameworks:
+
+#### Test Categories
+
+- **Unit Tests** (no mark): Fast, standalone tests with no external dependencies
+- **TUI Tests** (`@pytest.mark.tui`): Tests for the Textual-based Terminal User Interface
+- **Browser Tests** (`@pytest.mark.browser`): Playwright-based tests that run in real browsers
+
+#### Running Tests
 
 ```bash
-git clone https://github.com/yourusername/claude-reporter-setup.git
-cd claude-reporter-setup
-npm install
-node bin/setup.js
+# Run only unit tests (fast, recommended for development)
+uv run pytest -n auto -m "not (tui or browser)"
+
+# Run TUI tests (isolated event loop)
+uv run pytest -n auto -m tui
+
+# Run browser tests (requires Chromium)
+uv run pytest -n auto -m browser
+
+# Run all tests in sequence (separated to avoid conflicts)
+uv run pytest -n auto -m "not tui and not browser"; uv run pytest -n auto -m tui; uv run pytest -n auto -m browser
 ```
 
-## 🐛 Troubleshooting
+#### Prerequisites
 
-### "command not found: claude"
-
-**→ Mở terminal MỚI!** (Cmd+T hoặc Ctrl+Shift+T)
-
-Hoặc reload:
-```bash
-source ~/.zshrc  # or ~/.bashrc
-```
-
-### More issues?
-
-📖 Full guide: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-
-Common fixes:
-- Open NEW terminal window
-- Run `source ~/.zshrc` or `source ~/.bashrc`
-- Check `which claude`
-- Re-run setup: `npx claude-reporter-setup`
-
----
-
-## 🎯 Usage
-
-### Dùng Claude bình thường
+Browser tests require Chromium to be installed:
 
 ```bash
-# Reload shell
-source ~/.bashrc  # hoặc ~/.zshrc
-
-# Dùng Claude như thường lệ
-claude chat
-claude code fix-bug.py
-claude ask "explain this code"
-
-# Mọi thứ tự động được track!
+uv run playwright install chromium
 ```
 
-### Xem lịch sử sessions
+#### Why Test Categories?
+
+The test suite is categorized because:
+
+- **TUI tests** use Textual's async event loop (`run_test()`)
+- **Browser tests** use Playwright's internal asyncio
+- **pytest-asyncio** manages async test execution
+
+Running all tests together can cause "RuntimeError: This event loop is already running" conflicts. The categorization ensures reliable test execution by isolating different async frameworks.
+
+### Test Coverage
+
+Generate test coverage reports:
 
 ```bash
-# Xem 20 sessions gần nhất
-claude --view
+# Run tests with coverage
+uv run pytest -n auto --cov=claude_code_log --cov-report=html --cov-report=term
 
-# Xem config
-claude --config
+# Generate HTML coverage report only
+uv run pytest -n auto --cov=claude_code_log --cov-report=html
 
-# Xem thống kê
-claude --stats
+# View coverage in terminal
+uv run pytest -n auto --cov=claude_code_log --cov-report=term-missing
 ```
 
-### Xem reports
+HTML coverage reports are generated in `htmlcov/index.html`.
+
+**Comprehensive Testing & Style Guide**: The project includes extensive testing infrastructure and visual documentation. See [test/README.md](test/README.md) for details on:
+
+- **Unit Tests**: Template rendering, message type handling, edge cases
+- **Test Coverage**: 78%+ coverage across all modules with detailed reporting
+- **Visual Style Guide**: Interactive documentation showing all message types
+- **Representative Test Data**: Real-world JSONL samples for development
+- **Style Guide Generation**: Create visual documentation with `uv run python scripts/generate_style_guide.py`
+
+### Code Quality
+
+- **Format code**: `ruff format`
+- **Lint and fix**: `ruff check --fix`
+- **Type checking**: `uv run pyright` and `uv run ty check`
+
+### All Commands
+
+- **Test (Unit only)**: `uv run pytest -n auto`
+- **Test (TUI)**: `uv run pytest -n auto -m tui`
+- **Test (Browser)**: `uv run pytest -n auto -m browser`
+- **Test (All categories)**: `uv run pytest -n auto -m "not tui and not browser"; uv run pytest -n auto -m tui; uv run pytest -n auto -m browser`
+- **Test with Coverage**: `uv run pytest -n auto --cov=claude_code_log --cov-report=html --cov-report=term`
+- **Format**: `ruff format`
+- **Lint**: `ruff check --fix`
+- **Type Check**: `uv run pyright` and `uv run ty check`
+- **Generate Style Guide**: `uv run python scripts/generate_style_guide.py`
+
+Test with Claude transcript JSONL files typically found in `~/.claude/projects/` directories.
+
+## Release Process (For Maintainers)
+
+The project uses an automated release process with semantic versioning. Here's how to create and publish a new release:
+
+### Quick Release
 
 ```bash
-# Mở thư mục reports
-cd ~/.claude-reporter/reports
-ls -lt
+# Bump version and create release (patch/minor/major)
+just release-prep patch    # For bug fixes
+just release-prep minor    # For new features
+just release-prep major    # For breaking changes
 
-# Hoặc dùng script helper
-~/.claude-reporter/view-reports.sh
+# Or specify exact version
+just release-prep 0.4.3
+
+# Preview what would be released
+just release-preview
+
+# Push to PyPI and create GitHub release
+just release-push
 ```
 
-## ⚙️ Configuration
+3. **GitHub Release Only**: If you need to create/update just the GitHub release:
 
-### Storage Options
+   ```bash
+   just github-release          # For latest tag
+   just github-release 0.4.2    # For specific version
+   ```
 
-Claude Reporter hỗ trợ nhiều storage backends:
+### Cache Structure and Benefits
 
-#### 1. Google Drive (Recommended)
+The tool implements a sophisticated caching system for performance:
 
-Tự động upload reports lên Google Drive của bạn:
+- **Cache Location**: `.cache/` directory within each project folder
+- **Session Metadata**: Pre-parsed session information (IDs, summaries, timestamps, token usage)
+- **Timestamp Index**: Enables fast date-range filtering without parsing full files
+- **Invalidation**: Automatic detection of stale cache based on file modification times
+- **Performance**: 10-100x faster loading for large projects with many sessions
+
+The cache is transparent to users and automatically rebuilds when:
+
+- Source JSONL files are modified
+- New sessions are added
+- Cache structure version changes
+
+## Project Hierarchy Output
+
+When processing all projects, the tool generates:
+
+```sh
+~/.claude/projects/
+├── index.html                           # Master index with project cards
+├── project1/
+│   ├── combined_transcripts.html        # Combined project page
+│   ├── session-{session-id}.html        # Individual session pages
+│   └── session-{session-id2}.html       # More session pages...
+├── project2/
+│   ├── combined_transcripts.html
+│   └── session-{session-id}.html
+└── ...
+```
+
+### Index Page Features
+
+- **Project Cards**: Each project shown as a clickable card with statistics
+- **Session Navigation**: Expandable session list with summaries and quick access to individual session files
+- **Summary Statistics**: Total projects, transcript files, and message counts with token usage
+- **Recent Activity**: Projects sorted by last modification date
+- **Quick Navigation**: One-click access to combined transcripts or individual sessions
+- **Clean URLs**: Readable project names converted from directory names
+
+## Message Types Supported
+
+- **User Messages**: Regular user inputs and prompts
+- **Assistant Messages**: Claude's responses with token usage display
+- **Summary Messages**: Session summaries with cross-session matching
+- **System Commands**: Commands like `init` shown in expandable details with structured parsing
+- **Tool Use**: Tool invocations with collapsible details and special TodoWrite rendering
+- **Tool Results**: Tool execution results with error handling
+- **Thinking Content**: Claude's internal reasoning processes
+- **Images**: Pasted images and screenshots
+
+## HTML Output Features
+
+- **Responsive Design**: Works on desktop and mobile
+- **Runtime Message Filtering**: JavaScript controls to show/hide message types with live counts
+- **Session Navigation**: Interactive table of contents with session summaries and timestamp ranges
+- **Token Usage Display**: Individual message and session-level token consumption tracking
+- **Syntax Highlighting**: Code blocks properly formatted with markdown rendering
+- **Markdown Support**: Server-side rendering with mistune including:
+  - Headers, lists, emphasis, strikethrough
+  - Code blocks and inline code
+  - Links, images, and tables
+  - GitHub Flavored Markdown features
+- **Collapsible Content**: Tool use, system commands, and long content in expandable sections
+- **Floating Controls**: Always-available filter button, details toggle, and back-to-top navigation
+- **Cross-Session Features**: Summaries properly matched across async sessions
+
+## Installation
+
+Install using pip:
 
 ```bash
-# Chọn Google Drive khi setup
-npx claude-reporter-setup
-
-# Hoặc switch sau này
-~/.claude-reporter/switch-storage.sh
+pip install claude-code-log
 ```
 
-📖 Chi tiết: [GDRIVE_SETUP.md](GDRIVE_SETUP.md)
-
-#### 2. Webhook/HTTP
-
-Gửi reports đến custom endpoint:
+Or run directly with uvx (no separate installation step required):
 
 ```bash
-# Setup webhook
-~/.claude-reporter/switch-storage.sh
-# Chọn option 2
-
-# Hoặc edit config
-nano ~/.claude-reporter/config.json
+uvx claude-code-log@latest
 ```
 
-Test với webhook.site:
-1. Truy cập https://webhook.site
-2. Copy unique URL
-3. Paste vào config
-
-#### 3. Local Storage
-
-Chỉ lưu local, không gửi đi đâu:
+Or install from source:
 
 ```bash
-~/.claude-reporter/switch-storage.sh
-# Chọn option 3
+git clone https://github.com/daaain/claude-code-log.git
+cd claude-code-log
+uv sync
+uv run claude-code-log
 ```
 
-Reports lưu tại: `~/.claude-reporter/reports/`
+## TODO
 
-#### 4. Enterprise
-
-Cần custom integration (Slack, Teams, Jira)?
-
-📧 Contact: enterprise@claude-reporter.com
-
-### Setup Webhook
-
-1. Truy cập https://webhook.site
-2. Copy URL duy nhất của bạn
-3. Update config:
-
-```bash
-cd ~/.claude-reporter
-./update-webhook.sh
-```
-
-### Manual Config
-
-Edit file: `~/.claude-reporter/config.json`
-
-```json
-{
-  "report_endpoint": "https://webhook.site/your-unique-url",
-  "discord_webhook": "https://discord.com/api/webhooks/...",
-  "auto_report": true,
-  "save_local": true,
-  "log_commands": true
-}
-```
-
-### Discord Webhook Setup
-
-1. Vào Discord Server Settings → Integrations → Webhooks
-2. Create Webhook
-3. Copy Webhook URL
-4. Paste vào `discord_webhook` trong config
-
-## 📊 Report Format
-
-Reports được gửi dưng dạng JSON:
-
-```json
-{
-  "session_id": "550e8400-e29b-41d4-a716-446655440000",
-  "started_at": "2025-01-15T10:30:00",
-  "ended_at": "2025-01-15T10:45:00",
-  "status": "completed",
-  "working_dir": "/home/user/project",
-  "command": "claude chat",
-  "log_preview": "...",
-  "exit_code": 0,
-  "timestamp": "2025-01-15T10:45:00"
-}
-```
-
-### Status values:
-- `completed` - Session kết thúc bình thường
-- `interrupted` - User nhấn Ctrl+C
-- `error` - Có lỗi xảy ra
-
-## 🗂️ File Structure
-
-```
-~/.claude-reporter/
-├── config.json           # Configuration
-├── sessions.db          # SQLite database
-├── claude-reporter.py   # Main script
-├── reports/             # JSON reports
-├── logs/                # Session logs
-├── backups/            # Backups
-├── view-reports.sh     # Helper script
-└── update-webhook.sh   # Helper script
-```
-
-## 🔧 Advanced Usage
-
-### Custom Webhook Handler
-
-Bạn có thể tự host webhook endpoint:
-
-```javascript
-// Express.js example
-app.post('/claude-report', (req, res) => {
-  const report = req.body;
-  
-  // Save to database
-  db.reports.insert(report);
-  
-  // Send notification
-  if (report.status === 'error') {
-    sendSlackAlert(report);
-  }
-  
-  res.json({ received: true });
-});
-```
-
-### Query Database
-
-```bash
-sqlite3 ~/.claude-reporter/sessions.db
-```
-
-```sql
--- Xem tất cả sessions
-SELECT * FROM sessions ORDER BY started_at DESC LIMIT 10;
-
--- Sessions có lỗi
-SELECT * FROM sessions WHERE status = 'error';
-
--- Thống kê theo ngày
-SELECT DATE(started_at), COUNT(*) 
-FROM sessions 
-GROUP BY DATE(started_at);
-```
-
-## 🐛 Troubleshooting
-
-### "Claude not found"
-
-```bash
-# Check Claude CLI installation
-which claude
-
-# Install Claude CLI
-# Visit: https://docs.anthropic.com/claude-code
-```
-
-### Reports không gửi được
-
-```bash
-# Check config
-claude --config
-
-# Test webhook manually
-curl -X POST your-webhook-url \
-  -H "Content-Type: application/json" \
-  -d '{"test": true}'
-```
-
-### Permission denied
-
-```bash
-chmod +x ~/.claude-reporter/claude-reporter.py
-chmod +x ~/.claude-reporter/*.sh
-```
-
-## 📝 Example Workflows
-
-### Workflow 1: Track team activity
-
-```bash
-# Setup webhook pointing to team dashboard
-# Everyone on team runs: npx claude-reporter-setup
-# All Claude sessions auto-reported to central dashboard
-```
-
-### Workflow 2: Personal analytics
-
-```bash
-# Use webhook.site for quick viewing
-# Or setup local server to analyze patterns
-# View stats: claude --stats
-```
-
-### Workflow 3: CI/CD integration
-
-```bash
-# In CI pipeline
-npx claude-reporter-setup --ci
-claude code --review pr-123
-# Report sent to build system
-```
-
-## 🤝 Contributing
-
-Contributions welcome! Please:
-
-1. Fork repo
-2. Create feature branch
-3. Make changes
-4. Test thoroughly
-5. Submit PR
-
-## 📄 License
-
-MIT License - feel free to use anywhere!
-
-## 🔗 Links
-
-- [Claude Code Docs](https://docs.anthropic.com/claude-code)
-- [NPM Package](https://npmjs.com/package/claude-reporter-setup)
-- [GitHub](https://github.com/yourusername/claude-reporter-setup)
-- [Issues](https://github.com/yourusername/claude-reporter-setup/issues)
-
-## 💬 Support
-
-- GitHub Issues: [Report bugs](https://github.com/yourusername/claude-reporter-setup/issues)
-- Discord: [Join community](https://discord.gg/...)
-- Email: your-email@example.com
-
-## 🎉 Credits
-
-Made with ❤️ for the Claude community
-
----
-
-**Happy coding with Claude! 🚀**
+- tutorial overlay
+- integrate `claude-trace` request logs if present?
+- convert images to WebP as screenshots are often huge PNGs – this might be time consuming to keep redoing (so would also need some caching) and need heavy dependencies with compilation (unless there are fast pure Python conversation libraries? Or WASM?)
+- add special formatting for built-in tools: Bash, Glob, Grep, LS, exit_plan_mode, Read, Edit, MultiEdit, Write, NotebookRead, NotebookEdit, WebFetch, TodoRead, TodoWrite, WebSearch
+- do we need to handle compacted conversation?
+- Thinking block should have Markdown rendering as sometimes they have formatting
+- system blocks like `init` also don't render perfectly, losing new lines
+- add `ccusage` like daily summary and maybe some textual summary too based on Claude generate session summaries?
+– import logs from @claude Github Actions
+- stream logs from @claude Github Actions, see [octotail](https://github.com/getbettr/octotail)
+- wrap up CLI as Github Action to run after Cladue Github Action and process [output](https://github.com/anthropics/claude-code-base-action?tab=readme-ov-file#outputs)
+- feed the filtered user messages to headless claude CLI to distill the user intent from the session
+- filter message type on Python (CLI) side too, not just UI
+- Markdown renderer
+- add minimalist theme and make it light + dark; animate gradient background in fancy theme
+- do we need special handling for hooks?
+- make processing parallel, currently we only use 1 CPU (core) and it's slow
+- migrate cache from JSON files to SQLite to make it faster and more versatile for downstream tasks and analytics
+- merge git worktree directories

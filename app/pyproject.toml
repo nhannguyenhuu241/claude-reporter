@@ -1,0 +1,62 @@
+[project]
+name = "claudecodelog"
+version = "0.8.0"
+description = "Convert Claude Code transcript JSONL files to HTML"
+authors = [
+    {name = "Daniel Demmel", email = "hello@danieldemmel.me"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "briefcase>=0.3.26",
+]
+
+[tool.briefcase]
+project_name = "Claude Code Log"
+bundle = "com.claudecode"
+url = "https://github.com/daaain/claude-code-log"
+
+[tool.briefcase.app.claudecodelog]
+formal_name = "Claude Code Log"
+description = "Convert Claude Code transcript JSONL files to HTML"
+long_description = """A desktop application that converts Claude Code transcript files into readable HTML format with session navigation and token usage tracking."""
+sources = ["claudecodelog"]
+test_sources = []
+requires = [
+    "click>=8.3.0",
+    "dateparser>=1.2.2",
+    "pydantic>=2.12.0",
+    "jinja2>=3.1.6",
+    "mistune>=3.1.4",
+    "anthropic>=0.72.0",
+    "toml>=0.10.2",
+    "textual==6.5.0",
+    "packaging>=25.0",
+    "gitpython>=3.1.45",
+    "pygments>=2.19.2",
+    "toga>=0.4.0",
+    "certifi>=2024.0.0",
+]
+
+icon = "resources/icon"
+
+[tool.briefcase.app.claudecodelog.macOS]
+requires = []
+sign_app = true
+notarize_app = true
+
+[tool.briefcase.app.claudecodelog.windows]
+requires = []
+
+[tool.briefcase.app.claudecodelog.linux]
+requires = []
+system_requires = []
+
+[tool.briefcase.app.claudecodelog.linux.system.debian]
+system_requires = []
+
+[tool.briefcase.app.claudecodelog.linux.system.rhel]
+system_requires = []
+
+[tool.briefcase.app.claudecodelog.linux.system.arch]
+system_requires = []

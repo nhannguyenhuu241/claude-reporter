@@ -1,0 +1,11 @@
+Metadata-Version: 2.1
+Briefcase-Version: 0.3.26
+Name: claudecodelog
+Formal-Name: Claude Code Log
+App-ID: com.claudecode.claudecodelog
+Version: 0.8.0
+Home-page: https://github.com/daaain/claude-code-log
+Download-URL: https://github.com/daaain/claude-code-log
+Author: Daniel Demmel
+Author-email: hello@danieldemmel.me
+Summary: Convert Claude Code transcript JSONL files to HTML

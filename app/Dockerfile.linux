@@ -1,0 +1,54 @@
+# Dockerfile for building Linux desktop app
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
+# Install system dependencies for GTK4 and PyGObject
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-dev \
+    python3-venv \
+    python3-pip \
+    python3-gi \
+    python3-gi-cairo \
+    curl \
+    git \
+    libgirepository-2.0-dev \
+    libgirepository-1.0-dev \
+    libcairo2-dev \
+    pkg-config \
+    gir1.2-gtk-4.0 \
+    libgtk-4-dev \
+    libwebkitgtk-6.0-dev \
+    libadwaita-1-dev \
+    gobject-introspection \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# Install briefcase
+RUN uv tool install briefcase
+ENV PATH="/root/.local/share/uv/tools/briefcase/bin:$PATH"
+
+WORKDIR /build
+
+# Copy source files
+COPY . /build/
+
+# Sync source files from parent
+RUN cp -r /build/claude_code_log/*.py /build/app/claudecodelog/claude_code_log/ && \
+    cp -r /build/claude_code_log/templates /build/app/claudecodelog/claude_code_log/
+
+WORKDIR /build/app
+
+# Build the app
+RUN briefcase create linux && \
+    briefcase update linux -r && \
+    briefcase build linux && \
+    briefcase package linux --packaging-format system
+
+# Output will be in /build/app/dist/
+CMD ["ls", "-la", "dist/"]

@@ -1,0 +1,29 @@
+{
+  "name": "claude-code-log",
+  "version": "0.8.0",
+  "description": "Convert Claude Code transcript JSONL files to HTML with interactive TUI",
+  "bin": {
+    "claude-code-log": "./bin/cli.js"
+  },
+  "keywords": [
+    "claude",
+    "anthropic",
+    "transcript",
+    "jsonl",
+    "html",
+    "tui",
+    "cli"
+  ],
+  "author": "Nhan Nguyen",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leovu/claude-code-log.git"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "files": [
+    "bin"
+  ]
+}

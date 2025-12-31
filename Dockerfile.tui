@@ -1,0 +1,40 @@
+# Dockerfile for building Linux TUI binary (lightweight, no GTK needed)
+FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install build tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install uv
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+WORKDIR /build
+
+# Copy source files
+COPY pyproject.toml uv.lock README.md ./
+COPY claude_code_log ./claude_code_log/
+
+# Install dependencies and PyInstaller
+RUN uv sync --no-dev && uv pip install pyinstaller
+
+# Build standalone binary
+RUN uv run pyinstaller \
+    --onefile \
+    --name claude-code-log \
+    --hidden-import=textual \
+    --hidden-import=click \
+    --hidden-import=dateparser \
+    --hidden-import=pydantic \
+    --hidden-import=jinja2 \
+    --hidden-import=mistune \
+    --hidden-import=pygments \
+    --collect-data textual \
+    --collect-data jinja2 \
+    claude_code_log/cli.py
+
+# Output in /build/dist/claude-code-log
+CMD ["ls", "-la", "dist/"]
