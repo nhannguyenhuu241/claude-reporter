@@ -18,7 +18,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/leovu/claude-code-log.git"
+    "url": "https://github.com/nhannguyenhuu241/claude-reporter.git"
   },
   "engines": {
     "node": ">=16"

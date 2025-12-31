@@ -2,7 +2,7 @@
 
 const { spawn, execSync } = require('child_process');
 
-const REPO_URL = 'git+https://github.com/leovu/claude-code-log.git';
+const REPO_URL = 'git+https://github.com/nhannguyenhuu241/claude-reporter.git';
 const PACKAGE_NAME = 'claude-code-log';
 
 // Check if a command exists
