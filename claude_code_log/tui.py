@@ -301,45 +301,37 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
 
         with TabbedContent():
             with TabPane("Converter", id="converter-tab"):
-                yield from self._compose_converter_tab()
+                with Vertical(id="converter-container"):
+                    # Mode display
+                    with Container(id="mode-display"):
+                        yield Label(self._get_mode_text(), id="mode-label")
+
+                    # Selected path display
+                    with Container(id="path-display"):
+                        yield Label(self._get_path_text(), id="path-label")
+
+                    # Options display
+                    with Container(id="options-display"):
+                        yield Label(self._get_options_text(), id="options-label")
+
+                    # File browser
+                    with Container(id="file-browser"):
+                        yield DirectoryTree(str(self.browse_path), id="dir-tree")
+
+                    # Progress and status
+                    with Container(id="progress-container"):
+                        yield ProgressBar(id="progress-bar", total=100, show_eta=False)
+                        yield Label(self.status_message, id="status-text")
 
             with TabPane("Sessions", id="sessions-tab"):
-                yield from self._compose_sessions_tab()
+                with Vertical():
+                    with Container(id="stats-container"):
+                        yield Label("Select a project to view sessions", id="stats")
+
+                    yield DataTable[str](id="sessions-table", cursor_type="row")
+                    yield Static("", id="expanded-content")
 
         yield Footer()
-
-    def _compose_converter_tab(self) -> ComposeResult:
-        """Compose the converter tab UI."""
-        with Vertical(id="converter-container"):
-            # Mode display
-            with Container(id="mode-display"):
-                yield Label(self._get_mode_text(), id="mode-label")
-
-            # Selected path display
-            with Container(id="path-display"):
-                yield Label(self._get_path_text(), id="path-label")
-
-            # Options display
-            with Container(id="options-display"):
-                yield Label(self._get_options_text(), id="options-label")
-
-            # File browser
-            with Container(id="file-browser"):
-                yield DirectoryTree(str(self.browse_path), id="dir-tree")
-
-            # Progress and status
-            with Container(id="progress-container"):
-                yield ProgressBar(id="progress-bar", total=100, show_eta=False)
-                yield Label(self.status_message, id="status-text")
-
-    def _compose_sessions_tab(self) -> ComposeResult:
-        """Compose the sessions browser tab UI."""
-        with Vertical():
-            with Container(id="stats-container"):
-                yield Label("Select a project to view sessions", id="stats")
-
-            yield DataTable[str](id="sessions-table", cursor_type="row")
-            yield Static("", id="expanded-content")
 
     def _get_mode_text(self) -> str:
         """Get mode display text."""
