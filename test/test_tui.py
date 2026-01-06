@@ -331,30 +331,28 @@ class TestSessionBrowser:
                 assert app.selected_session_id is not None
 
     @pytest.mark.asyncio
-    async def test_export_action_no_selection(self, temp_project_dir):
-        """Test export action when no session is selected."""
+    async def test_export_action_no_html_file(self, temp_project_dir):
+        """Test export action when HTML file doesn't exist."""
         app = SessionBrowser(temp_project_dir)
 
         with patch("claude_code_log.tui.webbrowser.open") as mock_browser:
             async with app.run_test() as pilot:
                 await pilot.pause()
 
-                # Manually clear the selection (since DataTable auto-selects first row)
-                app.selected_session_id = None
-
-                # Try to export without selecting a session
+                # Try to export without HTML file existing
                 app.action_export_selected()
 
-                # Should still have no selection (action should not change it)
-                assert app.selected_session_id is None
-                # Browser should not have been opened
+                # Browser should not have been opened (file doesn't exist)
                 mock_browser.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_export_action_with_selection(self, temp_project_dir):
-        """Test export action with a selected session."""
+    async def test_export_action_with_html_file(self, temp_project_dir):
+        """Test export action opens combined_transcripts.html."""
+        # Create the combined_transcripts.html file
+        html_file = temp_project_dir / "combined_transcripts.html"
+        html_file.write_text("<html></html>")
+
         app = SessionBrowser(temp_project_dir)
-        app.selected_session_id = "session-123"
 
         with patch("claude_code_log.tui.webbrowser.open") as mock_browser:
             async with app.run_test() as pilot:
@@ -363,9 +361,8 @@ class TestSessionBrowser:
                 # Test export action
                 app.action_export_selected()
 
-                # Check that browser was opened with the session HTML file
-                expected_file = temp_project_dir / "session-session-123.html"
-                mock_browser.assert_called_once_with(f"file://{expected_file}")
+                # Check that browser was opened with combined_transcripts.html
+                mock_browser.assert_called_once_with(f"file://{html_file}")
 
     @pytest.mark.asyncio
     async def test_resume_action_no_selection(self, temp_project_dir):

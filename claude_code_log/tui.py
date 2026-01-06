@@ -656,15 +656,19 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             pass
 
     def action_export_selected(self) -> None:
-        """Export the selected session to HTML."""
-        if not self.selected_session_id or not self.project_path:
-            self.notify("No session selected", severity="warning")
+        """Open the combined transcripts HTML file."""
+        if not self.project_path:
+            self.notify("No project selected", severity="warning")
             return
 
         try:
-            session_file = self.project_path / f"session-{self.selected_session_id}.html"
-            webbrowser.open(f"file://{session_file}")
-            self.notify(f"Opened: {session_file.name}")
+            # Open combined_transcripts.html like the Desktop App's Convert button
+            html_file = self.project_path / "combined_transcripts.html"
+            if html_file.exists():
+                webbrowser.open(f"file://{html_file}")
+                self.notify(f"Opened: {html_file.name}")
+            else:
+                self.notify("Run Convert first to generate HTML", severity="warning")
         except Exception as e:
             self.notify(f"Error: {e}", severity="error")
 
