@@ -109,7 +109,20 @@ class TestClaudeCodeLogTUI:
             assert app.query_one("#title-label", Label)
             assert app.query_one("#mode-select", Select)
             assert app.query_one("#convert-btn", Button)
+            assert app.query_one("#upload-btn", Button)  # Upload to Google button
             assert app.query_one("#status-log", Static)
+
+    @pytest.mark.asyncio
+    async def test_upload_button_exists(self, temp_project_dir):
+        """Test that upload button exists and has correct label."""
+        app = ClaudeCodeLogTUI(temp_project_dir)
+
+        async with app.run_test(size=(120, 80)) as pilot:
+            await pilot.pause(0.1)
+
+            upload_btn = app.query_one("#upload-btn", Button)
+            assert upload_btn is not None
+            assert "Upload" in str(upload_btn.label)
 
     @pytest.mark.asyncio
     async def test_mode_selection(self, temp_project_dir):

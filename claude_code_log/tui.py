@@ -2,7 +2,10 @@
 """Interactive Terminal User Interface for Claude Code Log - Desktop App Style."""
 
 import os
+import shutil
+import tempfile
 import webbrowser
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import ClassVar, Dict, List, Optional, cast
@@ -298,15 +301,24 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     #action-section {
         height: auto;
         layout: horizontal;
+        margin-top: 1;
     }
 
     #convert-btn {
         width: 1fr;
         margin-right: 1;
+        min-width: 20;
+    }
+
+    #upload-btn {
+        width: 1fr;
+        margin-right: 1;
+        min-width: 20;
     }
 
     #clear-btn {
         width: 15;
+        min-width: 12;
     }
     """
 
@@ -413,6 +425,7 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             # Action buttons section
             with Horizontal(id="action-section"):
                 yield Button("Convert", id="convert-btn", variant="primary")
+                yield Button("Upload to Google", id="upload-btn", variant="success")
                 yield Button("Clear Log", id="clear-btn")
 
         yield Footer()
@@ -516,6 +529,8 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             self.notify("Browse: Enter path manually or use Tab to navigate", timeout=3)
         elif button_id == "output-browse":
             self.notify("Browse: Enter path manually or use Tab to navigate", timeout=3)
+        elif button_id == "upload-btn":
+            self._do_upload_to_google()
 
     def action_select_all(self) -> None:
         """Select all project checkboxes."""
@@ -726,6 +741,102 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         except Exception:
             pass
         self.notify("Log cleared")
+
+    def _do_upload_to_google(self) -> None:
+        """Create zip file and upload to Google Drive."""
+        self.run_worker(self._upload_to_google_async(), exclusive=True)
+
+    async def _upload_to_google_async(self) -> None:
+        """Create zip and open Google Drive upload page."""
+        try:
+            progress = self.query_one("#progress-bar", ProgressBar)
+            progress.update(progress=0)
+
+            self.add_log("Preparing files for upload...")
+
+            # Get the output path or default to ~/.claude/projects/
+            output_path_str = self.query_one("#output-path", Input).value.strip()
+            if output_path_str:
+                source_dir = Path(output_path_str)
+            else:
+                source_dir = self.projects_dir
+
+            if not source_dir.exists():
+                self.add_log(f"Error: Directory does not exist: {source_dir}")
+                self.notify("Directory does not exist!", severity="error")
+                return
+
+            # Find HTML files to zip
+            html_files = list(source_dir.rglob("*.html"))
+            if not html_files:
+                self.add_log("Error: No HTML files found to upload!")
+                self.notify("No HTML files found! Run Convert first.", severity="error")
+                return
+
+            progress.update(progress=20)
+            self.add_log(f"Found {len(html_files)} HTML files...")
+
+            # Create zip file in temp directory
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            zip_filename = f"claude_code_log_{timestamp}.zip"
+
+            # Save zip to Downloads folder or home directory
+            downloads_dir = Path.home() / "Downloads"
+            if downloads_dir.exists():
+                zip_path = downloads_dir / zip_filename
+            else:
+                zip_path = Path.home() / zip_filename
+
+            self.add_log(f"Creating zip file: {zip_path}")
+            progress.update(progress=40)
+
+            # Create the zip file
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for i, html_file in enumerate(html_files):
+                    # Calculate relative path from source_dir
+                    try:
+                        rel_path = html_file.relative_to(source_dir)
+                    except ValueError:
+                        rel_path = html_file.name
+
+                    zf.write(html_file, rel_path)
+
+                    # Update progress
+                    pct = 40 + int(40 * (i + 1) / len(html_files))
+                    progress.update(progress=pct)
+
+            progress.update(progress=85)
+
+            # Get file size
+            zip_size = zip_path.stat().st_size
+            size_mb = zip_size / (1024 * 1024)
+            self.add_log(f"Zip created: {zip_filename} ({size_mb:.2f} MB)")
+
+            progress.update(progress=90)
+
+            # Open Google Drive upload page
+            self.add_log("Opening Google Drive...")
+            google_drive_url = "https://drive.google.com/drive/my-drive"
+            webbrowser.open(google_drive_url)
+
+            progress.update(progress=95)
+
+            # Also open the folder containing the zip
+            if os.name == 'nt':  # Windows
+                os.startfile(zip_path.parent)
+            elif os.name == 'posix':
+                if os.uname().sysname == 'Darwin':  # macOS
+                    os.system(f'open "{zip_path.parent}"')
+                else:  # Linux
+                    os.system(f'xdg-open "{zip_path.parent}"')
+
+            progress.update(progress=100)
+            self.add_log(f"Done! Drag {zip_filename} to Google Drive")
+            self.notify(f"Zip created! Drag to Google Drive to upload.", timeout=8)
+
+        except Exception as e:
+            self.add_log(f"Error: {e}")
+            self.notify(f"Error: {e}", severity="error")
 
     def action_toggle_help(self) -> None:
         """Show help information."""
