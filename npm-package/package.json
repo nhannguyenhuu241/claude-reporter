@@ -1,6 +1,6 @@
 {
   "name": "claude-code-log",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Convert Claude Code transcript JSONL files to HTML with interactive TUI",
   "bin": {
     "claude-code-log": "./bin/cli.js"
