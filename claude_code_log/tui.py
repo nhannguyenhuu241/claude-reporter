@@ -9,19 +9,28 @@ from typing import ClassVar, Dict, Optional, cast
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Container, Vertical
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.widgets import (
     DataTable,
+    DirectoryTree,
     Footer,
     Header,
     Label,
+    ProgressBar,
     Static,
+    TabbedContent,
+    TabPane,
 )
 from textual.reactive import reactive
 
 from .cache import CacheManager, SessionCacheData, get_library_version
-from .converter import ensure_fresh_cache
+from .converter import convert_jsonl_to_html, ensure_fresh_cache
 from .renderer import get_project_display_name
+
+
+def get_default_projects_dir() -> Path:
+    """Get the default Claude projects directory path."""
+    return Path.home() / ".claude" / "projects"
 
 
 class ProjectSelector(App[Path]):
@@ -42,7 +51,7 @@ class ProjectSelector(App[Path]):
     TITLE = "Claude Code Log - Project Selector"
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("q", "quit", "Quit"),
-        Binding("s", "select_project", "Select Project"),
+        Binding("enter", "select_project", "Select"),
     ]
 
     selected_project_path: reactive[Optional[Path]] = reactive(
@@ -165,7 +174,7 @@ class ProjectSelector(App[Path]):
 
 
 class ClaudeCodeLogTUI(App[Optional[str]]):
-    """Main TUI application for browsing Claude Code sessions."""
+    """Main TUI application with Converter and Session browser."""
 
     CSS = """
     #main-container {
@@ -173,6 +182,50 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         height: 100%;
     }
 
+    /* Converter Tab Styles */
+    #converter-container {
+        height: 100%;
+    }
+
+    #mode-display {
+        height: 3;
+        border: solid $primary;
+        margin-bottom: 1;
+        padding: 0 1;
+    }
+
+    #path-display {
+        height: 3;
+        border: solid $secondary;
+        margin-bottom: 1;
+        padding: 0 1;
+    }
+
+    #options-display {
+        height: 3;
+        border: solid $surface;
+        margin-bottom: 1;
+        padding: 0 1;
+    }
+
+    #file-browser {
+        height: 1fr;
+        min-height: 10;
+        border: solid $primary;
+        margin-bottom: 1;
+    }
+
+    #progress-container {
+        height: 4;
+        border: solid $secondary;
+        padding: 0 1;
+    }
+
+    #status-text {
+        height: 2;
+    }
+
+    /* Sessions Tab Styles */
     #stats-container {
         height: auto;
         min-height: 3;
@@ -190,13 +243,30 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         border: solid $secondary;
         overflow-y: auto;
     }
+
+    /* Highlight selected options */
+    .option-on {
+        color: $success;
+    }
+
+    .option-off {
+        color: $text-muted;
+    }
     """
 
     TITLE = "Claude Code Log"
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("q", "quit", "Quit"),
-        Binding("h", "export_selected", "Open HTML"),
-        Binding("c", "resume_selected", "Resume Claude"),
+        # Converter bindings
+        Binding("d", "mode_directory", "Directory"),
+        Binding("f", "mode_file", "Single File"),
+        Binding("1", "toggle_browser", "Browser"),
+        Binding("2", "toggle_skip", "Skip"),
+        Binding("3", "toggle_cache", "Cache"),
+        Binding("enter", "convert", "Convert"),
+        # Sessions bindings
+        Binding("h", "export_selected", "HTML"),
+        Binding("c", "resume_selected", "Claude"),
         Binding("r", "refresh", "Refresh"),
         Binding("e", "toggle_expanded", "Expand"),
         Binding("p", "back_to_projects", "Projects"),
@@ -204,6 +274,15 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     ]
 
     # Reactive state
+    mode: reactive[str] = reactive("directory")  # "directory" or "file"
+    selected_path: reactive[Optional[Path]] = reactive(cast(Optional[Path], None))
+    opt_open_browser: reactive[bool] = reactive(True)
+    opt_skip_sessions: reactive[bool] = reactive(False)
+    opt_clear_cache: reactive[bool] = reactive(False)
+    is_converting: reactive[bool] = reactive(False)
+    status_message: reactive[str] = reactive("Ready. Select a path and press Enter to convert.")
+
+    # Sessions state
     selected_session_id: reactive[Optional[str]] = reactive(cast(Optional[str], None))
     is_expanded: reactive[bool] = reactive(False)
 
@@ -213,32 +292,251 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         self.theme = "gruvbox"
         self.project_path = project_path
         self.sessions: Dict[str, SessionCacheData] = {}
+        # Default to home directory for browsing
+        self.browse_path = Path.home()
 
     def compose(self) -> ComposeResult:
         """Create the UI layout."""
         yield Header()
 
-        with Container(id="main-container"):
-            with Vertical():
-                with Container(id="stats-container"):
-                    yield Label("Loading project information...", id="stats")
+        with TabbedContent():
+            with TabPane("Converter", id="converter-tab"):
+                yield from self._compose_converter_tab()
 
-                yield DataTable[str](id="sessions-table", cursor_type="row")
-                yield Static("", id="expanded-content")
+            with TabPane("Sessions", id="sessions-tab"):
+                yield from self._compose_sessions_tab()
 
         yield Footer()
+
+    def _compose_converter_tab(self) -> ComposeResult:
+        """Compose the converter tab UI."""
+        with Vertical(id="converter-container"):
+            # Mode display
+            with Container(id="mode-display"):
+                yield Label(self._get_mode_text(), id="mode-label")
+
+            # Selected path display
+            with Container(id="path-display"):
+                yield Label(self._get_path_text(), id="path-label")
+
+            # Options display
+            with Container(id="options-display"):
+                yield Label(self._get_options_text(), id="options-label")
+
+            # File browser
+            with Container(id="file-browser"):
+                yield DirectoryTree(str(self.browse_path), id="dir-tree")
+
+            # Progress and status
+            with Container(id="progress-container"):
+                yield ProgressBar(id="progress-bar", total=100, show_eta=False)
+                yield Label(self.status_message, id="status-text")
+
+    def _compose_sessions_tab(self) -> ComposeResult:
+        """Compose the sessions browser tab UI."""
+        with Vertical():
+            with Container(id="stats-container"):
+                yield Label("Select a project to view sessions", id="stats")
+
+            yield DataTable[str](id="sessions-table", cursor_type="row")
+            yield Static("", id="expanded-content")
+
+    def _get_mode_text(self) -> str:
+        """Get mode display text."""
+        mode_name = "Directory" if self.mode == "directory" else "Single File"
+        return f"[bold]Mode:[/bold] {mode_name}  [dim](d=Directory, f=File)[/dim]"
+
+    def _get_path_text(self) -> str:
+        """Get path display text."""
+        if self.selected_path:
+            return f"[bold]Selected:[/bold] {self.selected_path}"
+        return "[bold]Selected:[/bold] [dim]None - Navigate and press Enter to select[/dim]"
+
+    def _get_options_text(self) -> str:
+        """Get options display text."""
+        browser_status = "[green]ON[/green]" if self.opt_open_browser else "[dim]OFF[/dim]"
+        skip_status = "[green]ON[/green]" if self.opt_skip_sessions else "[dim]OFF[/dim]"
+        cache_status = "[green]ON[/green]" if self.opt_clear_cache else "[dim]OFF[/dim]"
+
+        return (
+            f"[bold]Options:[/bold] "
+            f"[1] Browser: {browser_status}  "
+            f"[2] Skip Sessions: {skip_status}  "
+            f"[3] Clear Cache: {cache_status}"
+        )
+
+    def _update_displays(self) -> None:
+        """Update all display labels."""
+        try:
+            self.query_one("#mode-label", Label).update(self._get_mode_text())
+            self.query_one("#path-label", Label).update(self._get_path_text())
+            self.query_one("#options-label", Label).update(self._get_options_text())
+            self.query_one("#status-text", Label).update(self.status_message)
+        except Exception:
+            pass
 
     def on_mount(self) -> None:
         """Initialize the application when mounted."""
         if self.project_path:
+            self.selected_path = self.project_path
             self.load_sessions()
+            self._update_displays()
 
-    def on_resize(self) -> None:
-        """Handle terminal resize events."""
-        if self.sessions:
-            self.populate_sessions_table()
-            self.update_stats()
+    def watch_mode(self, new_mode: str) -> None:
+        """React to mode changes."""
+        self._update_displays()
 
+    def watch_selected_path(self, new_path: Optional[Path]) -> None:
+        """React to selected path changes."""
+        self._update_displays()
+
+    def watch_opt_open_browser(self, value: bool) -> None:
+        """React to option changes."""
+        self._update_displays()
+
+    def watch_opt_skip_sessions(self, value: bool) -> None:
+        """React to option changes."""
+        self._update_displays()
+
+    def watch_opt_clear_cache(self, value: bool) -> None:
+        """React to option changes."""
+        self._update_displays()
+
+    def watch_status_message(self, message: str) -> None:
+        """React to status message changes."""
+        try:
+            self.query_one("#status-text", Label).update(message)
+        except Exception:
+            pass
+
+    # Directory Tree handlers
+    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
+        """Handle file selection in directory tree."""
+        if self.mode == "file":
+            selected = Path(event.path)
+            if selected.suffix == ".jsonl":
+                self.selected_path = selected
+                self.status_message = f"Selected file: {selected.name}"
+            else:
+                self.status_message = "Please select a .jsonl file"
+        else:
+            self.status_message = "In Directory mode - select a folder instead"
+
+    def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
+        """Handle directory selection in directory tree."""
+        if self.mode == "directory":
+            selected = Path(event.path)
+            # Check if it has .jsonl files
+            jsonl_files = list(selected.glob("*.jsonl"))
+            if jsonl_files:
+                self.selected_path = selected
+                self.status_message = f"Selected directory: {selected.name} ({len(jsonl_files)} JSONL files)"
+            else:
+                self.status_message = f"No JSONL files in {selected.name}"
+        else:
+            self.status_message = "In File mode - select a .jsonl file instead"
+
+    # Mode actions
+    def action_mode_directory(self) -> None:
+        """Switch to directory mode."""
+        self.mode = "directory"
+        self.status_message = "Mode: Directory - Select a folder with JSONL files"
+        self.notify("Mode: Directory")
+
+    def action_mode_file(self) -> None:
+        """Switch to single file mode."""
+        self.mode = "file"
+        self.status_message = "Mode: Single File - Select a .jsonl file"
+        self.notify("Mode: Single File")
+
+    # Option toggles
+    def action_toggle_browser(self) -> None:
+        """Toggle open browser option."""
+        self.opt_open_browser = not self.opt_open_browser
+        status = "ON" if self.opt_open_browser else "OFF"
+        self.notify(f"Open Browser: {status}")
+
+    def action_toggle_skip(self) -> None:
+        """Toggle skip sessions option."""
+        self.opt_skip_sessions = not self.opt_skip_sessions
+        status = "ON" if self.opt_skip_sessions else "OFF"
+        self.notify(f"Skip Sessions: {status}")
+
+    def action_toggle_cache(self) -> None:
+        """Toggle clear cache option."""
+        self.opt_clear_cache = not self.opt_clear_cache
+        status = "ON" if self.opt_clear_cache else "OFF"
+        self.notify(f"Clear Cache: {status}")
+
+    # Convert action
+    def action_convert(self) -> None:
+        """Start conversion."""
+        if self.is_converting:
+            self.notify("Conversion in progress...", severity="warning")
+            return
+
+        if not self.selected_path:
+            self.notify("No path selected!", severity="error")
+            return
+
+        if not self.selected_path.exists():
+            self.notify(f"Path does not exist: {self.selected_path}", severity="error")
+            return
+
+        self.is_converting = True
+        self.status_message = "Converting..."
+        self.run_worker(self._do_convert(), exclusive=True)
+
+    async def _do_convert(self) -> None:
+        """Perform conversion in background."""
+        try:
+            progress = self.query_one("#progress-bar", ProgressBar)
+            progress.update(progress=10)
+
+            if self.opt_clear_cache and self.selected_path and self.selected_path.is_dir():
+                cache_manager = CacheManager(self.selected_path, get_library_version())
+                cache_manager.clear_cache()
+                self.status_message = "Cache cleared..."
+                progress.update(progress=20)
+
+            self.status_message = f"Processing: {self.selected_path}"
+            progress.update(progress=30)
+
+            result = convert_jsonl_to_html(
+                input_path=self.selected_path,
+                output_path=None,
+                from_date=None,
+                to_date=None,
+                generate_individual_sessions=not self.opt_skip_sessions,
+            )
+
+            progress.update(progress=90)
+
+            if result:
+                self.status_message = f"Done! Output: {result}"
+                progress.update(progress=100)
+
+                if self.opt_open_browser:
+                    webbrowser.open(f"file://{result}")
+                    self.status_message += " (Opened in browser)"
+
+                # Update sessions if we converted the current project
+                if self.selected_path and self.selected_path.is_dir():
+                    self.project_path = self.selected_path
+                    self.load_sessions()
+
+                self.notify("Conversion complete!", severity="information")
+            else:
+                self.status_message = "Conversion failed - no output generated"
+                self.notify("Conversion failed", severity="error")
+
+        except Exception as e:
+            self.status_message = f"Error: {e}"
+            self.notify(f"Error: {e}", severity="error")
+        finally:
+            self.is_converting = False
+
+    # Session Browser Methods
     def load_sessions(self) -> None:
         """Load session information from cache."""
         if not self.project_path:
@@ -516,16 +814,19 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     def action_toggle_help(self) -> None:
         """Show help information."""
         help_text = (
-            "Claude Code Log - Session Browser\n\n"
-            "Navigation:\n"
-            "- Use arrow keys to select sessions\n\n"
-            "Actions:\n"
-            "- h: Open selected session's HTML page\n"
-            "- c: Resume session in Claude Code\n"
-            "- e: Toggle expanded view\n"
-            "- r: Refresh data\n"
-            "- p: Open project selector\n"
-            "- q: Quit\n"
+            "Claude Code Log TUI\n\n"
+            "Converter Tab:\n"
+            "- d/f: Switch mode (Directory/File)\n"
+            "- 1/2/3: Toggle options\n"
+            "- Enter: Start conversion\n"
+            "- Navigate with arrows\n\n"
+            "Sessions Tab:\n"
+            "- h: Open HTML\n"
+            "- c: Resume Claude\n"
+            "- e: Expand view\n"
+            "- r: Refresh\n"
+            "- p: Projects\n"
+            "- q: Quit"
         )
         self.notify(help_text, timeout=10)
 
