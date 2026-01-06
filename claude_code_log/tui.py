@@ -15,7 +15,6 @@ from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal, ScrollableContainer, Vertical, VerticalScroll
 from textual.widgets import (
     Button,
-    Checkbox,
     Footer,
     Header,
     Input,
@@ -166,9 +165,10 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         max-height: 10;
     }
 
-    .project-checkbox {
+    .project-item {
         margin: 0;
         padding: 0;
+        color: $success;
     }
 
     /* Output section */
@@ -288,8 +288,6 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         Binding("q", "quit", "Quit"),
         Binding("enter", "convert", "Convert"),
         Binding("r", "refresh", "Refresh"),
-        Binding("a", "select_all", "All"),
-        Binding("d", "deselect_all", "None"),
         Binding("?", "toggle_help", "Help"),
     ]
 
@@ -303,7 +301,7 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         self.project_path = project_path
         self.projects_dir = get_default_projects_dir()
         self.projects: List[dict] = []
-        self.project_checkboxes: List[Checkbox] = []
+        self.project_items: List[Static] = []
         self.sessions: Dict[str, SessionCacheData] = {}
         self.selected_session_id: Optional[str] = None
         self.is_expanded: bool = False
@@ -319,13 +317,11 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
                 yield Label("Claude Code Log Converter", id="title-label")
                 yield Label("Convert Claude Code transcript JSONL files to HTML", id="subtitle-label")
 
-            # Project selection (all projects selected by default)
+            # Project list (all projects always selected)
             with Vertical(id="projects-section"):
                 with Horizontal(id="projects-header"):
-                    yield Label("Projects:", id="projects-label")
+                    yield Label("Projects (all selected):", id="projects-label")
                     yield Button("Refresh", id="refresh-btn", classes="header-button")
-                    yield Button("Select All", id="select-all-btn", classes="header-button")
-                    yield Button("Deselect", id="deselect-btn", classes="header-button")
 
                 with VerticalScroll(id="projects-scroll"):
                     yield Static("Loading projects...", id="projects-loading")
@@ -391,10 +387,10 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         """Load list of projects with sessions."""
         self.add_log("Discovering projects...")
         self.projects = discover_projects_with_sessions(self.projects_dir)
-        self._populate_project_checkboxes()
+        self._populate_project_list()
 
-    def _populate_project_checkboxes(self) -> None:
-        """Populate the project checkboxes."""
+    def _populate_project_list(self) -> None:
+        """Populate the project list (all projects always selected)."""
         scroll = self.query_one("#projects-scroll", VerticalScroll)
 
         # Remove existing content
@@ -404,28 +400,28 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         except Exception:
             pass
 
-        # Remove old checkboxes
-        for checkbox in self.project_checkboxes:
+        # Remove old items
+        for item in self.project_items:
             try:
-                checkbox.remove()
+                item.remove()
             except Exception:
                 pass
-        self.project_checkboxes = []
+        self.project_items = []
 
         if not self.projects:
             scroll.mount(Static("No projects with sessions found in ~/.claude/projects/", id="no-projects"))
             self.add_log("No projects with sessions found.")
             return
 
-        # Create checkbox for each project (all selected by default)
+        # Create static label for each project (all always selected)
         for project in self.projects:
-            info_text = f"{project['name'][:40]} ({project['session_count']} sessions, {project['message_count']} msgs)"
-            checkbox = Checkbox(info_text, value=True, classes="project-checkbox")  # Selected by default
-            checkbox.project_data = project  # Store project data
-            self.project_checkboxes.append(checkbox)
-            scroll.mount(checkbox)
+            info_text = f"✓ {project['name'][:40]} ({project['session_count']} sessions, {project['message_count']} msgs)"
+            item = Static(info_text, classes="project-item")
+            item.project_data = project  # type: ignore  # Store project data
+            self.project_items.append(item)
+            scroll.mount(item)
 
-        self.add_log(f"Found {len(self.projects)} projects. All selected.")
+        self.add_log(f"Found {len(self.projects)} projects. All will be converted.")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -437,10 +433,6 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             self._clear_log()
         elif button_id == "refresh-btn":
             self.action_refresh()
-        elif button_id == "select-all-btn":
-            self.action_select_all()
-        elif button_id == "deselect-btn":
-            self.action_deselect_all()
         elif button_id == "clear-from":
             self.query_one("#from-date", Input).value = ""
         elif button_id == "clear-to":
@@ -449,20 +441,6 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             self.notify("Browse: Enter path manually or use Tab to navigate", timeout=3)
         elif button_id == "upload-btn":
             self._do_upload_to_google()
-
-    def action_select_all(self) -> None:
-        """Select all project checkboxes."""
-        for checkbox in self.project_checkboxes:
-            checkbox.value = True
-        self.add_log(f"Selected all {len(self.project_checkboxes)} projects.")
-        self.notify(f"Selected {len(self.project_checkboxes)} projects")
-
-    def action_deselect_all(self) -> None:
-        """Deselect all project checkboxes."""
-        for checkbox in self.project_checkboxes:
-            checkbox.value = False
-        self.add_log("Deselected all projects.")
-        self.notify("Deselected all projects")
 
     def action_refresh(self) -> None:
         """Refresh projects list."""
@@ -502,24 +480,20 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             output_path_str = self.query_one("#output-path", Input).value.strip()
             output_path = Path(output_path_str) if output_path_str else None
 
-            # Get selected projects
-            selected_projects = [
-                cb.project_data["path"]
-                for cb in self.project_checkboxes
-                if cb.value and hasattr(cb, "project_data")
-            ]
+            # Get all projects (all always selected)
+            all_projects = [project["path"] for project in self.projects]
 
-            if not selected_projects:
-                self.add_log("Error: No projects selected!")
-                self.notify("No projects selected!", severity="error")
+            if not all_projects:
+                self.add_log("Error: No projects found!")
+                self.notify("No projects found!", severity="error")
                 return
 
-            self.add_log(f"Processing {len(selected_projects)} projects...")
+            self.add_log(f"Processing {len(all_projects)} projects...")
             progress.update(progress=10)
 
             if clear_cache:
                 self.add_log("Clearing cache...")
-                for project in selected_projects:
+                for project in all_projects:
                     try:
                         cache_manager = CacheManager(project, get_library_version())
                         cache_manager.clear_cache()
@@ -533,7 +507,7 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
 
             try:
                 result_path = process_selected_projects(
-                    selected_project_dirs=selected_projects,
+                    selected_project_dirs=all_projects,
                     from_date=from_date,
                     to_date=to_date,
                     use_cache=not clear_cache,
@@ -699,7 +673,7 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     def action_toggle_help(self) -> None:
         """Show help information."""
         help_text = (
-            "Shortcuts: Enter=Convert, r=Refresh, a=Select All, d=Deselect All, q=Quit"
+            "Shortcuts: Enter=Convert, r=Refresh, q=Quit"
         )
         self.notify(help_text, timeout=8)
 

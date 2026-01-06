@@ -9,7 +9,7 @@ from typing import cast
 from unittest.mock import Mock, patch
 
 import pytest
-from textual.widgets import Button, Checkbox, Input, Label, Static, Switch
+from textual.widgets import Button, Input, Label, Static, Switch
 
 from claude_code_log.cache import CacheManager, SessionCacheData
 from claude_code_log.tui import ClaudeCodeLogTUI, SessionBrowser, run_session_browser, run_tui
@@ -88,7 +88,7 @@ class TestClaudeCodeLogTUI:
         assert app.sessions == {}
         assert app.selected_session_id is None
         assert app.projects == []
-        assert app.project_checkboxes == []
+        assert app.project_items == []
         assert app.log_messages == []
 
     def test_init_no_project_path(self):
@@ -285,8 +285,8 @@ class TestClaudeCodeLogTUI:
                 assert len(app.projects) == 1
 
     @pytest.mark.asyncio
-    async def test_select_all_deselect_all(self, temp_project_dir):
-        """Test select all and deselect all buttons."""
+    async def test_all_projects_always_selected(self, temp_project_dir):
+        """Test that all projects are always selected (no checkboxes)."""
         mock_projects = [
             {
                 "path": temp_project_dir / "project1",
@@ -313,23 +313,12 @@ class TestClaudeCodeLogTUI:
             async with app.run_test() as pilot:
                 await pilot.pause(0.2)
 
-                # Select all
-                await pilot.click("#select-all-btn")
-                await pilot.pause(0.1)
-
-                for cb in app.project_checkboxes:
-                    assert cb.value is True
-
-                # Deselect all
-                await pilot.click("#deselect-btn")
-                await pilot.pause(0.1)
-
-                for cb in app.project_checkboxes:
-                    assert cb.value is False
+                # All projects should be listed as Static items
+                assert len(app.project_items) == 2
 
     @pytest.mark.asyncio
-    async def test_convert_no_projects_selected(self, temp_project_dir):
-        """Test convert with no projects selected shows error."""
+    async def test_convert_no_projects_found(self, temp_project_dir):
+        """Test convert with no projects found shows error."""
         with patch(
             "claude_code_log.tui.discover_projects_with_sessions",
             return_value=[],
@@ -347,7 +336,7 @@ class TestClaudeCodeLogTUI:
                 await pilot.pause(1.0)  # Wait for async worker
 
                 # Should have logged an error (with "Error:" prefix)
-                assert any("No projects selected" in msg for msg in app.log_messages), \
+                assert any("No projects found" in msg for msg in app.log_messages), \
                     f"Expected error message not found. Log messages: {app.log_messages}"
 
     @pytest.mark.asyncio
@@ -364,67 +353,6 @@ class TestClaudeCodeLogTUI:
 
             # Should show help notification (handled by app)
 
-    @pytest.mark.asyncio
-    async def test_action_select_all(self, temp_project_dir):
-        """Test action_select_all method."""
-        mock_projects = [
-            {
-                "path": temp_project_dir / "project1",
-                "name": "project1",
-                "session_count": 1,
-                "message_count": 2,
-                "last_modified": "2025-01-01 10:00",
-            },
-        ]
-
-        with patch(
-            "claude_code_log.tui.discover_projects_with_sessions",
-            return_value=mock_projects,
-        ):
-            app = ClaudeCodeLogTUI(temp_project_dir)
-
-            async with app.run_test() as pilot:
-                await pilot.pause(0.2)
-
-                # Use keyboard shortcut for select all
-                await pilot.press("a")
-                await pilot.pause(0.1)
-
-                for cb in app.project_checkboxes:
-                    assert cb.value is True
-
-    @pytest.mark.asyncio
-    async def test_action_deselect_all(self, temp_project_dir):
-        """Test action_deselect_all method."""
-        mock_projects = [
-            {
-                "path": temp_project_dir / "project1",
-                "name": "project1",
-                "session_count": 1,
-                "message_count": 2,
-                "last_modified": "2025-01-01 10:00",
-            },
-        ]
-
-        with patch(
-            "claude_code_log.tui.discover_projects_with_sessions",
-            return_value=mock_projects,
-        ):
-            app = ClaudeCodeLogTUI(temp_project_dir)
-
-            async with app.run_test() as pilot:
-                await pilot.pause(0.2)
-
-                # First select all
-                await pilot.press("a")
-                await pilot.pause(0.1)
-
-                # Then deselect all
-                await pilot.press("d")
-                await pilot.pause(0.1)
-
-                for cb in app.project_checkboxes:
-                    assert cb.value is False
 
 
 @pytest.mark.tui
@@ -623,4 +551,4 @@ class TestIntegration:
 
                 # Should handle empty projects gracefully
                 assert len(app.projects) == 0
-                assert len(app.project_checkboxes) == 0
+                assert len(app.project_items) == 0
