@@ -5,14 +5,13 @@ import os
 import webbrowser
 from datetime import datetime
 from pathlib import Path
-from typing import ClassVar, Dict, Optional, cast
+from typing import ClassVar, Dict, List, Optional, cast
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
-from textual.containers import Container, Horizontal, Vertical, VerticalScroll
+from textual.containers import Container, Vertical
 from textual.widgets import (
     DataTable,
-    DirectoryTree,
     Footer,
     Header,
     Label,
@@ -31,6 +30,16 @@ from .renderer import get_project_display_name
 def get_default_projects_dir() -> Path:
     """Get the default Claude projects directory path."""
     return Path.home() / ".claude" / "projects"
+
+
+def discover_projects(projects_dir: Path) -> List[Path]:
+    """Discover all projects with JSONL files."""
+    if not projects_dir.exists():
+        return []
+    return [
+        d for d in sorted(projects_dir.iterdir())
+        if d.is_dir() and list(d.glob("*.jsonl"))
+    ]
 
 
 class ProjectSelector(App[Path]):
@@ -177,60 +186,50 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     """Main TUI application with Converter and Session browser."""
 
     CSS = """
-    #main-container {
-        padding: 0;
-        height: 100%;
-    }
-
     /* Converter Tab Styles */
     #converter-container {
         height: 100%;
+        padding: 1;
     }
 
-    #mode-display {
-        height: 3;
+    #info-box {
+        height: auto;
         border: solid $primary;
+        padding: 1;
         margin-bottom: 1;
-        padding: 0 1;
     }
 
-    #path-display {
-        height: 3;
+    #options-box {
+        height: auto;
         border: solid $secondary;
+        padding: 1;
         margin-bottom: 1;
-        padding: 0 1;
     }
 
-    #options-display {
-        height: 3;
-        border: solid $surface;
-        margin-bottom: 1;
-        padding: 0 1;
-    }
-
-    #file-browser {
+    #projects-list {
         height: 1fr;
-        min-height: 10;
+        min-height: 8;
         border: solid $primary;
         margin-bottom: 1;
     }
 
-    #progress-container {
-        height: 4;
-        border: solid $secondary;
-        padding: 0 1;
-    }
-
-    #status-text {
-        height: 2;
+    #status-box {
+        height: 5;
+        border: solid $surface;
+        padding: 1;
     }
 
     /* Sessions Tab Styles */
+    #sessions-container {
+        height: 100%;
+    }
+
     #stats-container {
         height: auto;
         min-height: 3;
         max-height: 5;
         border: solid $primary;
+        padding: 0 1;
     }
 
     #sessions-table {
@@ -239,18 +238,11 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
 
     #expanded-content {
         display: none;
-        height: 1fr;
+        height: auto;
+        max-height: 10;
         border: solid $secondary;
+        padding: 1;
         overflow-y: auto;
-    }
-
-    /* Highlight selected options */
-    .option-on {
-        color: $success;
-    }
-
-    .option-off {
-        color: $text-muted;
     }
     """
 
@@ -258,29 +250,26 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     BINDINGS: ClassVar[list[BindingType]] = [
         Binding("q", "quit", "Quit"),
         # Converter bindings
-        Binding("d", "mode_directory", "Directory"),
-        Binding("f", "mode_file", "Single File"),
-        Binding("1", "toggle_browser", "Browser"),
-        Binding("2", "toggle_skip", "Skip"),
-        Binding("3", "toggle_cache", "Cache"),
-        Binding("enter", "convert", "Convert"),
+        Binding("1", "toggle_browser", "[1]Browser"),
+        Binding("2", "toggle_skip", "[2]Skip"),
+        Binding("3", "toggle_cache", "[3]Cache"),
+        Binding("enter", "convert_or_select", "Convert"),
+        Binding("r", "refresh", "Refresh"),
         # Sessions bindings
         Binding("h", "export_selected", "HTML"),
         Binding("c", "resume_selected", "Claude"),
-        Binding("r", "refresh", "Refresh"),
         Binding("e", "toggle_expanded", "Expand"),
         Binding("p", "back_to_projects", "Projects"),
         Binding("?", "toggle_help", "Help"),
     ]
 
     # Reactive state
-    mode: reactive[str] = reactive("directory")  # "directory" or "file"
-    selected_path: reactive[Optional[Path]] = reactive(cast(Optional[Path], None))
+    selected_project: reactive[Optional[Path]] = reactive(cast(Optional[Path], None))
     opt_open_browser: reactive[bool] = reactive(True)
     opt_skip_sessions: reactive[bool] = reactive(False)
     opt_clear_cache: reactive[bool] = reactive(False)
     is_converting: reactive[bool] = reactive(False)
-    status_message: reactive[str] = reactive("Ready. Select a path and press Enter to convert.")
+    status_message: reactive[str] = reactive("Select a project and press Enter to convert")
 
     # Sessions state
     selected_session_id: reactive[Optional[str]] = reactive(cast(Optional[str], None))
@@ -292,8 +281,8 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         self.theme = "gruvbox"
         self.project_path = project_path
         self.sessions: Dict[str, SessionCacheData] = {}
-        # Default to home directory for browsing
-        self.browse_path = Path.home()
+        self.projects: List[Path] = []
+        self.projects_dir = get_default_projects_dir()
 
     def compose(self) -> ComposeResult:
         """Create the UI layout."""
@@ -302,200 +291,206 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         with TabbedContent():
             with TabPane("Converter", id="converter-tab"):
                 with Vertical(id="converter-container"):
-                    # Mode display
-                    with Container(id="mode-display"):
-                        yield Label(self._get_mode_text(), id="mode-label")
+                    # Info section
+                    with Container(id="info-box"):
+                        yield Label(
+                            "[bold]Claude Code Log Converter[/bold]\n"
+                            "Select a project from the list below and press Enter to convert.",
+                            id="info-label"
+                        )
 
-                    # Selected path display
-                    with Container(id="path-display"):
-                        yield Label(self._get_path_text(), id="path-label")
-
-                    # Options display
-                    with Container(id="options-display"):
+                    # Options section
+                    with Container(id="options-box"):
                         yield Label(self._get_options_text(), id="options-label")
 
-                    # File browser
-                    with Container(id="file-browser"):
-                        yield DirectoryTree(str(self.browse_path), id="dir-tree")
+                    # Projects list
+                    with Container(id="projects-list"):
+                        yield DataTable[str](id="projects-table", cursor_type="row")
 
-                    # Progress and status
-                    with Container(id="progress-container"):
+                    # Status section
+                    with Container(id="status-box"):
                         yield ProgressBar(id="progress-bar", total=100, show_eta=False)
-                        yield Label(self.status_message, id="status-text")
+                        yield Label(self.status_message, id="status-label")
 
             with TabPane("Sessions", id="sessions-tab"):
-                with Vertical():
+                with Vertical(id="sessions-container"):
                     with Container(id="stats-container"):
-                        yield Label("Select a project to view sessions", id="stats")
+                        yield Label("Convert a project first to view sessions", id="stats")
 
                     yield DataTable[str](id="sessions-table", cursor_type="row")
                     yield Static("", id="expanded-content")
 
         yield Footer()
 
-    def _get_mode_text(self) -> str:
-        """Get mode display text."""
-        mode_name = "Directory" if self.mode == "directory" else "Single File"
-        return f"[bold]Mode:[/bold] {mode_name}  [dim](d=Directory, f=File)[/dim]"
-
-    def _get_path_text(self) -> str:
-        """Get path display text."""
-        if self.selected_path:
-            return f"[bold]Selected:[/bold] {self.selected_path}"
-        return "[bold]Selected:[/bold] [dim]None - Navigate and press Enter to select[/dim]"
-
     def _get_options_text(self) -> str:
         """Get options display text."""
-        browser_status = "[green]ON[/green]" if self.opt_open_browser else "[dim]OFF[/dim]"
-        skip_status = "[green]ON[/green]" if self.opt_skip_sessions else "[dim]OFF[/dim]"
-        cache_status = "[green]ON[/green]" if self.opt_clear_cache else "[dim]OFF[/dim]"
-
-        return (
-            f"[bold]Options:[/bold] "
-            f"[1] Browser: {browser_status}  "
-            f"[2] Skip Sessions: {skip_status}  "
-            f"[3] Clear Cache: {cache_status}"
-        )
-
-    def _update_displays(self) -> None:
-        """Update all display labels."""
-        try:
-            self.query_one("#mode-label", Label).update(self._get_mode_text())
-            self.query_one("#path-label", Label).update(self._get_path_text())
-            self.query_one("#options-label", Label).update(self._get_options_text())
-            self.query_one("#status-text", Label).update(self.status_message)
-        except Exception:
-            pass
+        b = "[green]ON[/green]" if self.opt_open_browser else "[dim]OFF[/dim]"
+        s = "[green]ON[/green]" if self.opt_skip_sessions else "[dim]OFF[/dim]"
+        c = "[green]ON[/green]" if self.opt_clear_cache else "[dim]OFF[/dim]"
+        return f"[bold]Options:[/bold]  [1] Open Browser: {b}   [2] Skip Sessions: {s}   [3] Clear Cache: {c}"
 
     def on_mount(self) -> None:
         """Initialize the application when mounted."""
+        self._load_projects()
         if self.project_path:
-            self.selected_path = self.project_path
+            self.selected_project = self.project_path
             self.load_sessions()
-            self._update_displays()
 
-    def watch_mode(self, new_mode: str) -> None:
-        """React to mode changes."""
-        self._update_displays()
+    def _load_projects(self) -> None:
+        """Load list of projects."""
+        self.projects = discover_projects(self.projects_dir)
+        self._populate_projects_table()
 
-    def watch_selected_path(self, new_path: Optional[Path]) -> None:
-        """React to selected path changes."""
-        self._update_displays()
-
-    def watch_opt_open_browser(self, value: bool) -> None:
-        """React to option changes."""
-        self._update_displays()
-
-    def watch_opt_skip_sessions(self, value: bool) -> None:
-        """React to option changes."""
-        self._update_displays()
-
-    def watch_opt_clear_cache(self, value: bool) -> None:
-        """React to option changes."""
-        self._update_displays()
-
-    def watch_status_message(self, message: str) -> None:
-        """React to status message changes."""
+    def _populate_projects_table(self) -> None:
+        """Populate the projects table."""
         try:
-            self.query_one("#status-text", Label).update(message)
+            table = cast(DataTable[str], self.query_one("#projects-table", DataTable))
+            table.clear(columns=True)
+
+            table.add_column("Project", width=50)
+            table.add_column("Sessions", width=10)
+            table.add_column("Files", width=8)
+
+            if not self.projects:
+                table.add_row("No projects found", "-", "-")
+                return
+
+            for project_path in self.projects:
+                try:
+                    jsonl_count = len(list(project_path.glob("*.jsonl")))
+                    cache_manager = CacheManager(project_path, get_library_version())
+                    project_cache = cache_manager.get_cached_project_data()
+
+                    session_count = 0
+                    if project_cache and project_cache.sessions:
+                        session_count = len(project_cache.sessions)
+
+                    # Get display name
+                    working_dirs = None
+                    if project_cache and project_cache.working_directories:
+                        working_dirs = project_cache.working_directories
+                    display_name = get_project_display_name(project_path.name, working_dirs)
+
+                    table.add_row(
+                        display_name[:48],
+                        str(session_count) if session_count else "-",
+                        str(jsonl_count),
+                    )
+                except Exception:
+                    table.add_row(project_path.name[:48], "?", "?")
         except Exception:
             pass
 
-    # Directory Tree handlers
-    def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
-        """Handle file selection in directory tree."""
-        if self.mode == "file":
-            selected = Path(event.path)
-            if selected.suffix == ".jsonl":
-                self.selected_path = selected
-                self.status_message = f"Selected file: {selected.name}"
-            else:
-                self.status_message = "Please select a .jsonl file"
-        else:
-            self.status_message = "In Directory mode - select a folder instead"
+    def _update_options_display(self) -> None:
+        """Update options label."""
+        try:
+            self.query_one("#options-label", Label).update(self._get_options_text())
+        except Exception:
+            pass
 
-    def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
-        """Handle directory selection in directory tree."""
-        if self.mode == "directory":
-            selected = Path(event.path)
-            # Check if it has .jsonl files
-            jsonl_files = list(selected.glob("*.jsonl"))
-            if jsonl_files:
-                self.selected_path = selected
-                self.status_message = f"Selected directory: {selected.name} ({len(jsonl_files)} JSONL files)"
-            else:
-                self.status_message = f"No JSONL files in {selected.name}"
-        else:
-            self.status_message = "In File mode - select a .jsonl file instead"
-
-    # Mode actions
-    def action_mode_directory(self) -> None:
-        """Switch to directory mode."""
-        self.mode = "directory"
-        self.status_message = "Mode: Directory - Select a folder with JSONL files"
-        self.notify("Mode: Directory")
-
-    def action_mode_file(self) -> None:
-        """Switch to single file mode."""
-        self.mode = "file"
-        self.status_message = "Mode: Single File - Select a .jsonl file"
-        self.notify("Mode: Single File")
+    def _update_status(self, message: str) -> None:
+        """Update status message."""
+        self.status_message = message
+        try:
+            self.query_one("#status-label", Label).update(message)
+        except Exception:
+            pass
 
     # Option toggles
     def action_toggle_browser(self) -> None:
         """Toggle open browser option."""
         self.opt_open_browser = not self.opt_open_browser
-        status = "ON" if self.opt_open_browser else "OFF"
-        self.notify(f"Open Browser: {status}")
+        self._update_options_display()
+        self.notify(f"Open Browser: {'ON' if self.opt_open_browser else 'OFF'}")
 
     def action_toggle_skip(self) -> None:
         """Toggle skip sessions option."""
         self.opt_skip_sessions = not self.opt_skip_sessions
-        status = "ON" if self.opt_skip_sessions else "OFF"
-        self.notify(f"Skip Sessions: {status}")
+        self._update_options_display()
+        self.notify(f"Skip Sessions: {'ON' if self.opt_skip_sessions else 'OFF'}")
 
     def action_toggle_cache(self) -> None:
         """Toggle clear cache option."""
         self.opt_clear_cache = not self.opt_clear_cache
-        status = "ON" if self.opt_clear_cache else "OFF"
-        self.notify(f"Clear Cache: {status}")
+        self._update_options_display()
+        self.notify(f"Clear Cache: {'ON' if self.opt_clear_cache else 'OFF'}")
 
-    # Convert action
-    def action_convert(self) -> None:
+    def action_refresh(self) -> None:
+        """Refresh projects list."""
+        self._load_projects()
+        if self.project_path:
+            self.load_sessions()
+        self.notify("Refreshed")
+
+    # Project selection
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        """Handle row highlighting."""
+        table_id = event.data_table.id
+        if table_id == "projects-table":
+            self._update_selected_project()
+        elif table_id == "sessions-table":
+            self._update_selected_session_from_cursor()
+            if self.is_expanded:
+                self._update_expanded_content()
+
+    def _update_selected_project(self) -> None:
+        """Update selected project from cursor."""
+        try:
+            table = cast(DataTable[str], self.query_one("#projects-table", DataTable))
+            cursor_row = table.cursor_row
+            if cursor_row < len(self.projects):
+                self.selected_project = self.projects[cursor_row]
+        except Exception:
+            pass
+
+    def action_convert_or_select(self) -> None:
+        """Convert selected project or select in sessions."""
+        # Check if we're in converter tab
+        try:
+            tabbed = self.query_one(TabbedContent)
+            if tabbed.active == "converter-tab":
+                self._do_convert()
+            else:
+                # In sessions tab, Enter does nothing special
+                pass
+        except Exception:
+            self._do_convert()
+
+    def _do_convert(self) -> None:
         """Start conversion."""
         if self.is_converting:
             self.notify("Conversion in progress...", severity="warning")
             return
 
-        if not self.selected_path:
-            self.notify("No path selected!", severity="error")
-            return
-
-        if not self.selected_path.exists():
-            self.notify(f"Path does not exist: {self.selected_path}", severity="error")
+        if not self.selected_project:
+            self.notify("No project selected!", severity="error")
             return
 
         self.is_converting = True
-        self.status_message = "Converting..."
-        self.run_worker(self._do_convert(), exclusive=True)
+        self._update_status("Converting...")
+        self.run_worker(self._convert_project(), exclusive=True)
 
-    async def _do_convert(self) -> None:
+    async def _convert_project(self) -> None:
         """Perform conversion in background."""
         try:
             progress = self.query_one("#progress-bar", ProgressBar)
             progress.update(progress=10)
 
-            if self.opt_clear_cache and self.selected_path and self.selected_path.is_dir():
-                cache_manager = CacheManager(self.selected_path, get_library_version())
+            project = self.selected_project
+            if not project:
+                return
+
+            if self.opt_clear_cache:
+                cache_manager = CacheManager(project, get_library_version())
                 cache_manager.clear_cache()
-                self.status_message = "Cache cleared..."
+                self._update_status("Cache cleared...")
                 progress.update(progress=20)
 
-            self.status_message = f"Processing: {self.selected_path}"
+            self._update_status(f"Processing: {project.name}")
             progress.update(progress=30)
 
             result = convert_jsonl_to_html(
-                input_path=self.selected_path,
+                input_path=project,
                 output_path=None,
                 from_date=None,
                 to_date=None,
@@ -505,25 +500,23 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             progress.update(progress=90)
 
             if result:
-                self.status_message = f"Done! Output: {result}"
+                self._update_status(f"Done! Output: {result.name}")
                 progress.update(progress=100)
 
                 if self.opt_open_browser:
                     webbrowser.open(f"file://{result}")
-                    self.status_message += " (Opened in browser)"
 
-                # Update sessions if we converted the current project
-                if self.selected_path and self.selected_path.is_dir():
-                    self.project_path = self.selected_path
-                    self.load_sessions()
+                # Update sessions
+                self.project_path = project
+                self.load_sessions()
 
-                self.notify("Conversion complete!", severity="information")
+                self.notify("Conversion complete!")
             else:
-                self.status_message = "Conversion failed - no output generated"
+                self._update_status("Conversion failed")
                 self.notify("Conversion failed", severity="error")
 
         except Exception as e:
-            self.status_message = f"Error: {e}"
+            self._update_status(f"Error: {e}")
             self.notify(f"Error: {e}", severity="error")
         finally:
             self.is_converting = False
@@ -567,15 +560,15 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         session_id_width = 10
         messages_width = 10
         tokens_width = 14
-        time_width = 16 if terminal_width >= 120 else 12
+        time_width = 12
         fixed_width = session_id_width + messages_width + tokens_width + (time_width * 2)
-        title_width = max(30, terminal_width - fixed_width - 8)
+        title_width = max(30, terminal_width - fixed_width - 10)
 
-        table.add_column("Session ID", width=session_id_width)
-        table.add_column("Title or First Message", width=title_width)
-        table.add_column("Start Time", width=time_width)
-        table.add_column("End Time", width=time_width)
-        table.add_column("Messages", width=messages_width)
+        table.add_column("Session", width=session_id_width)
+        table.add_column("Summary", width=title_width)
+        table.add_column("Start", width=time_width)
+        table.add_column("End", width=time_width)
+        table.add_column("Msgs", width=messages_width)
         table.add_column("Tokens", width=tokens_width)
 
         sorted_sessions = sorted(
@@ -583,28 +576,21 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         )
 
         for session_id, session_data in sorted_sessions:
-            use_short_format = terminal_width < 120
-            start_time = self.format_timestamp(
-                session_data.first_timestamp, short_format=use_short_format
-            )
-            end_time = self.format_timestamp(
-                session_data.last_timestamp, short_format=use_short_format
-            )
+            start_time = self.format_timestamp(session_data.first_timestamp)
+            end_time = self.format_timestamp(session_data.last_timestamp)
 
-            total_tokens = (
-                session_data.total_input_tokens + session_data.total_output_tokens
-            )
+            total_tokens = session_data.total_input_tokens + session_data.total_output_tokens
             token_display = f"{total_tokens:,}" if total_tokens > 0 else "-"
 
             preview = (
                 session_data.summary
                 or session_data.first_user_message
-                or "No preview available"
+                or "No preview"
             )
 
             table.add_row(
                 session_id[:8],
-                preview,
+                preview[:title_width-2],
                 start_time,
                 end_time,
                 str(session_data.message_count),
@@ -635,59 +621,25 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             self.project_path.name, working_directories
         )
 
-        if self.sessions:
-            timestamps = [
-                s.first_timestamp for s in self.sessions.values() if s.first_timestamp
-            ]
-            earliest = min(timestamps) if timestamps else ""
-            latest = max(
-                s.last_timestamp for s in self.sessions.values() if s.last_timestamp
-            ) if self.sessions else ""
+        stats_text = (
+            f"[bold]{project_name}[/bold]  |  "
+            f"Sessions: {total_sessions}  |  "
+            f"Messages: {total_messages:,}  |  "
+            f"Tokens: {total_tokens:,}"
+        )
 
-            date_range = ""
-            if earliest and latest:
-                earliest_date = self.format_timestamp(earliest, date_only=True)
-                latest_date = self.format_timestamp(latest, date_only=True)
-                if earliest_date == latest_date:
-                    date_range = earliest_date
-                else:
-                    date_range = f"{earliest_date} to {latest_date}"
-        else:
-            date_range = "No sessions found"
+        try:
+            self.query_one("#stats", Label).update(stats_text)
+        except Exception:
+            pass
 
-        terminal_width = self.size.width
-        project_section = f"[bold]Project:[/bold] {project_name}"
-        sessions_section = f"[bold]Sessions:[/bold] {total_sessions:,} | [bold]Messages:[/bold] {total_messages:,} | [bold]Tokens:[/bold] {total_tokens:,}"
-        date_section = f"[bold]Date Range:[/bold] {date_range}"
-
-        if terminal_width >= 120:
-            stats_text = f"{project_section}  {sessions_section}  {date_section}"
-        else:
-            stats_text = f"{project_section}\n{sessions_section}\n{date_section}"
-
-        stats_label = self.query_one("#stats", Label)
-        stats_label.update(stats_text)
-
-    def format_timestamp(
-        self, timestamp: str, date_only: bool = False, short_format: bool = False
-    ) -> str:
+    def format_timestamp(self, timestamp: str) -> str:
         """Format timestamp for display."""
         try:
             dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-            if date_only:
-                return dt.strftime("%Y-%m-%d")
-            elif short_format:
-                return dt.strftime("%m-%d %H:%M")
-            else:
-                return dt.strftime("%m-%d %H:%M")
+            return dt.strftime("%m-%d %H:%M")
         except (ValueError, AttributeError):
             return "Unknown"
-
-    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        """Handle row highlighting in the sessions table."""
-        self._update_selected_session_from_cursor()
-        if self.is_expanded:
-            self._update_expanded_content()
 
     def _update_selected_session_from_cursor(self) -> None:
         """Update the selected session based on the current cursor position."""
@@ -712,9 +664,9 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         try:
             session_file = self.project_path / f"session-{self.selected_session_id}.html"
             webbrowser.open(f"file://{session_file}")
-            self.notify(f"Opened session HTML: {session_file}")
+            self.notify(f"Opened: {session_file.name}")
         except Exception as e:
-            self.notify(f"Error opening session HTML: {e}", severity="error")
+            self.notify(f"Error: {e}", severity="error")
 
     def action_resume_selected(self) -> None:
         """Resume the selected session in Claude Code."""
@@ -732,18 +684,9 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             with self.suspend():
                 os.execvp("claude", ["claude", "-r", self.selected_session_id])
         except FileNotFoundError:
-            self.notify(
-                "Claude Code CLI not found. Make sure 'claude' is in your PATH.",
-                severity="error",
-            )
+            self.notify("Claude CLI not found", severity="error")
         except Exception as e:
-            self.notify(f"Error resuming session: {e}", severity="error")
-
-    def action_refresh(self) -> None:
-        """Refresh sessions."""
-        if self.project_path:
-            self.load_sessions()
-        self.notify("Refreshed")
+            self.notify(f"Error: {e}", severity="error")
 
     def _escape_rich_markup(self, text: str) -> str:
         """Escape Rich markup characters in text."""
@@ -759,37 +702,23 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         expanded_content = self.query_one("#expanded-content", Static)
         session_data = self.sessions[self.selected_session_id]
 
-        content_parts: list[str] = []
-        content_parts.append(f"[bold]Session ID:[/bold] {self.selected_session_id}")
+        parts: list[str] = []
+        parts.append(f"[bold]ID:[/bold] {self.selected_session_id}")
 
         if session_data.summary:
-            escaped_summary = self._escape_rich_markup(session_data.summary)
-            content_parts.append(f"\n[bold]Summary:[/bold] {escaped_summary}")
+            parts.append(f"[bold]Summary:[/bold] {self._escape_rich_markup(session_data.summary)}")
 
         if session_data.first_user_message:
-            escaped_message = self._escape_rich_markup(session_data.first_user_message)
-            content_parts.append(f"\n[bold]First User Message:[/bold] {escaped_message}")
+            parts.append(f"[bold]First Message:[/bold] {self._escape_rich_markup(session_data.first_user_message)}")
 
         if session_data.cwd:
-            escaped_cwd = self._escape_rich_markup(session_data.cwd)
-            content_parts.append(f"\n[bold]Working Directory:[/bold] {escaped_cwd}")
+            parts.append(f"[bold]Directory:[/bold] {self._escape_rich_markup(session_data.cwd)}")
 
-        total_tokens = (
-            session_data.total_input_tokens + session_data.total_output_tokens
-        )
-        if total_tokens > 0:
-            token_details = f"Input: {session_data.total_input_tokens:,} | Output: {session_data.total_output_tokens:,}"
-            if session_data.total_cache_creation_tokens > 0:
-                token_details += f" | Cache Creation: {session_data.total_cache_creation_tokens:,}"
-            if session_data.total_cache_read_tokens > 0:
-                token_details += f" | Cache Read: {session_data.total_cache_read_tokens:,}"
-            content_parts.append(f"\n[bold]Token Usage:[/bold] {token_details}")
-
-        expanded_content.update("\n".join(content_parts))
+        expanded_content.update("\n".join(parts))
 
     def action_toggle_expanded(self) -> None:
         """Toggle the expanded view for the selected session."""
-        if not self.selected_session_id or self.selected_session_id not in self.sessions:
+        if not self.selected_session_id:
             return
 
         expanded_content = self.query_one("#expanded-content", Static)
@@ -806,21 +735,10 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     def action_toggle_help(self) -> None:
         """Show help information."""
         help_text = (
-            "Claude Code Log TUI\n\n"
-            "Converter Tab:\n"
-            "- d/f: Switch mode (Directory/File)\n"
-            "- 1/2/3: Toggle options\n"
-            "- Enter: Start conversion\n"
-            "- Navigate with arrows\n\n"
-            "Sessions Tab:\n"
-            "- h: Open HTML\n"
-            "- c: Resume Claude\n"
-            "- e: Expand view\n"
-            "- r: Refresh\n"
-            "- p: Projects\n"
-            "- q: Quit"
+            "Converter: 1/2/3=Options, Enter=Convert, r=Refresh\n"
+            "Sessions: h=HTML, c=Claude, e=Expand, p=Projects, q=Quit"
         )
-        self.notify(help_text, timeout=10)
+        self.notify(help_text, timeout=8)
 
     def action_back_to_projects(self) -> None:
         """Navigate to the project selector."""
