@@ -80,7 +80,7 @@ def test_row_expansion_functionality():
             content = updated_content
 
             # Should contain session ID
-            assert "Session ID:" in content
+            assert "ID:" in content
             assert "test-session-123" in content
 
             # Should contain full summary
@@ -91,22 +91,17 @@ def test_row_expansion_functionality():
             )
 
             # Should contain first user message
-            assert "First User Message:" in content
+            assert "First Message:" in content
             assert (
                 "This is the first user message that should be displayed in full when the row is expanded"
                 in content
             )
 
             # Should contain working directory
-            assert "Working Directory:" in content
+            assert "Directory:" in content
             assert "/test/working/directory" in content
 
-            # Should contain token usage
-            assert "Token Usage:" in content
-            assert "Input: 150" in content
-            assert "Output: 75" in content
-            assert "Cache Creation: 25" in content
-            assert "Cache Read: 10" in content
+            # Note: Token usage section was removed in the simplified TUI
 
             # Toggle off
             browser.action_toggle_expanded()
@@ -181,21 +176,18 @@ def test_row_expansion_with_missing_data():
             content = updated_content
 
             # Should contain session ID
-            assert "Session ID:" in content
+            assert "ID:" in content
             assert "test-session-456" in content
 
             # Should NOT contain summary section (since it's None)
             assert "Summary:" not in content
 
             # Should contain first user message
-            assert "First User Message:" in content
+            assert "First Message:" in content
             assert "Only first user message available" in content
 
             # Should NOT contain working directory section (since it's None)
-            assert "Working Directory:" not in content
-
-            # Should NOT contain token usage section (since all tokens are 0)
-            assert "Token Usage:" not in content
+            assert "Directory:" not in content
 
 
 @pytest.mark.tui
