@@ -21,14 +21,13 @@ from textual.widgets import (
     Input,
     Label,
     ProgressBar,
-    Select,
     Static,
     Switch,
 )
 from textual.reactive import reactive
 
 from .cache import CacheManager, SessionCacheData, get_library_version
-from .converter import convert_jsonl_to_html, process_projects_hierarchy, ensure_fresh_cache
+from .converter import convert_jsonl_to_html, process_projects_hierarchy, process_selected_projects, ensure_fresh_cache
 from .renderer import get_project_display_name
 
 
@@ -136,23 +135,7 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         color: $text-muted;
     }
 
-    /* Mode selection */
-    #mode-section {
-        height: auto;
-        layout: horizontal;
-        margin-bottom: 1;
-    }
-
-    #mode-label {
-        width: 12;
-        margin-right: 1;
-    }
-
-    #mode-select {
-        width: 1fr;
-    }
-
-    /* Project selection (for All Projects mode) */
+    /* Project selection */
     #projects-section {
         height: auto;
         max-height: 15;
@@ -186,28 +169,6 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     .project-checkbox {
         margin: 0;
         padding: 0;
-    }
-
-    /* Input path section (for Directory/Single File mode) */
-    #input-section {
-        height: auto;
-        layout: horizontal;
-        margin-bottom: 1;
-        display: none;
-    }
-
-    #input-label {
-        width: 12;
-        margin-right: 1;
-    }
-
-    #input-path {
-        width: 1fr;
-        margin-right: 1;
-    }
-
-    #input-browse {
-        width: 12;
     }
 
     /* Output section */
@@ -333,7 +294,6 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     ]
 
     # Reactive state
-    current_mode: reactive[str] = reactive("All Projects")
     is_converting: reactive[bool] = reactive(False)
 
     def __init__(self, project_path: Optional[Path] = None):
@@ -359,35 +319,16 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
                 yield Label("Claude Code Log Converter", id="title-label")
                 yield Label("Convert Claude Code transcript JSONL files to HTML", id="subtitle-label")
 
-            # Mode selection
-            with Horizontal(id="mode-section"):
-                yield Label("Mode:", id="mode-label")
-                yield Select(
-                    [
-                        ("All Projects", "all"),
-                        ("Directory", "directory"),
-                        ("Single File", "single"),
-                    ],
-                    id="mode-select",
-                    value="all",
-                )
-
-            # Project selection (for All Projects mode)
+            # Project selection (all projects selected by default)
             with Vertical(id="projects-section"):
                 with Horizontal(id="projects-header"):
-                    yield Label("Select Projects:", id="projects-label")
+                    yield Label("Projects:", id="projects-label")
                     yield Button("Refresh", id="refresh-btn", classes="header-button")
                     yield Button("Select All", id="select-all-btn", classes="header-button")
                     yield Button("Deselect", id="deselect-btn", classes="header-button")
 
                 with VerticalScroll(id="projects-scroll"):
                     yield Static("Loading projects...", id="projects-loading")
-
-            # Input path section (for Directory/Single File mode)
-            with Horizontal(id="input-section"):
-                yield Label("Input:", id="input-label")
-                yield Input(placeholder="Enter directory or file path...", id="input-path")
-                yield Button("Browse", id="input-browse")
 
             # Output section
             with Horizontal(id="output-section"):
@@ -476,36 +417,15 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             self.add_log("No projects with sessions found.")
             return
 
-        # Create checkbox for each project
+        # Create checkbox for each project (all selected by default)
         for project in self.projects:
             info_text = f"{project['name'][:40]} ({project['session_count']} sessions, {project['message_count']} msgs)"
-            checkbox = Checkbox(info_text, value=False, classes="project-checkbox")
+            checkbox = Checkbox(info_text, value=True, classes="project-checkbox")  # Selected by default
             checkbox.project_data = project  # Store project data
             self.project_checkboxes.append(checkbox)
             scroll.mount(checkbox)
 
-        self.add_log(f"Found {len(self.projects)} projects with sessions.")
-
-    def on_select_changed(self, event: Select.Changed) -> None:
-        """Handle mode selection change."""
-        if event.select.id == "mode-select":
-            mode = event.value
-            self.current_mode = {
-                "all": "All Projects",
-                "directory": "Directory",
-                "single": "Single File",
-            }.get(mode, "All Projects")
-
-            # Show/hide sections based on mode
-            projects_section = self.query_one("#projects-section")
-            input_section = self.query_one("#input-section")
-
-            if mode == "all":
-                projects_section.set_styles("display: block;")
-                input_section.set_styles("display: none;")
-            else:
-                projects_section.set_styles("display: none;")
-                input_section.set_styles("display: block;")
+        self.add_log(f"Found {len(self.projects)} projects. All selected.")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button presses."""
@@ -525,8 +445,6 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             self.query_one("#from-date", Input).value = ""
         elif button_id == "clear-to":
             self.query_one("#to-date", Input).value = ""
-        elif button_id == "input-browse":
-            self.notify("Browse: Enter path manually or use Tab to navigate", timeout=3)
         elif button_id == "output-browse":
             self.notify("Browse: Enter path manually or use Tab to navigate", timeout=3)
         elif button_id == "upload-btn":
@@ -584,61 +502,48 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             output_path_str = self.query_one("#output-path", Input).value.strip()
             output_path = Path(output_path_str) if output_path_str else None
 
-            mode_select = self.query_one("#mode-select", Select)
-            mode = mode_select.value
+            # Get selected projects
+            selected_projects = [
+                cb.project_data["path"]
+                for cb in self.project_checkboxes
+                if cb.value and hasattr(cb, "project_data")
+            ]
 
-            if mode == "all":
-                # All Projects mode - process selected projects
-                selected_projects = [
-                    cb.project_data["path"]
-                    for cb in self.project_checkboxes
-                    if cb.value and hasattr(cb, "project_data")
-                ]
+            if not selected_projects:
+                self.add_log("Error: No projects selected!")
+                self.notify("No projects selected!", severity="error")
+                return
 
-                if not selected_projects:
-                    self.add_log("Error: No projects selected!")
-                    self.notify("No projects selected!", severity="error")
-                    return
+            self.add_log(f"Processing {len(selected_projects)} projects...")
+            progress.update(progress=10)
 
-                self.add_log(f"Processing {len(selected_projects)} projects...")
-                progress.update(progress=10)
-
-                if clear_cache:
-                    self.add_log("Clearing cache...")
-                    for project in selected_projects:
-                        try:
-                            cache_manager = CacheManager(project, get_library_version())
-                            cache_manager.clear_cache()
-                        except Exception:
-                            pass
-                    progress.update(progress=20)
-
-                # Process each project
-                total = len(selected_projects)
-                result_path = None
-
-                for i, project in enumerate(selected_projects):
-                    pct = 20 + int(70 * (i + 1) / total)
-                    self.add_log(f"Processing: {project.name}")
-                    progress.update(progress=pct)
-
+            if clear_cache:
+                self.add_log("Clearing cache...")
+                for project in selected_projects:
                     try:
-                        result = convert_jsonl_to_html(
-                            input_path=project,
-                            output_path=output_path / project.name if output_path else None,
-                            from_date=from_date,
-                            to_date=to_date,
-                            generate_individual_sessions=not skip_sessions,
-                        )
-                        if result:
-                            result_path = result
-                    except Exception as e:
-                        self.add_log(f"Error processing {project.name}: {e}")
+                        cache_manager = CacheManager(project, get_library_version())
+                        cache_manager.clear_cache()
+                    except Exception:
+                        pass
+                progress.update(progress=20)
 
-                progress.update(progress=95)
+            # Use process_selected_projects to create linked index.html
+            self.add_log("Generating HTML files with index...")
+            progress.update(progress=40)
+
+            try:
+                result_path = process_selected_projects(
+                    selected_project_dirs=selected_projects,
+                    from_date=from_date,
+                    to_date=to_date,
+                    use_cache=not clear_cache,
+                    generate_individual_sessions=not skip_sessions,
+                    output_dir=output_path,
+                )
+                progress.update(progress=90)
 
                 if result_path:
-                    self.add_log(f"Done! Output: {result_path.parent}")
+                    self.add_log(f"Done! Output: {result_path}")
                     progress.update(progress=100)
 
                     if open_browser and result_path.exists():
@@ -649,56 +554,9 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
                     self.add_log("No output generated")
                     self.notify("No output generated", severity="warning")
 
-            else:
-                # Directory or Single File mode
-                input_path_str = self.query_one("#input-path", Input).value.strip()
-                if not input_path_str:
-                    self.add_log("Error: No input path specified!")
-                    self.notify("No input path specified!", severity="error")
-                    return
-
-                input_path = Path(input_path_str)
-                if not input_path.exists():
-                    self.add_log(f"Error: Path does not exist: {input_path}")
-                    self.notify("Path does not exist!", severity="error")
-                    return
-
-                self.add_log(f"Processing: {input_path}")
-                progress.update(progress=10)
-
-                if clear_cache and input_path.is_dir():
-                    self.add_log("Clearing cache...")
-                    try:
-                        cache_manager = CacheManager(input_path, get_library_version())
-                        cache_manager.clear_cache()
-                    except Exception:
-                        pass
-                    progress.update(progress=20)
-
-                self.add_log("Converting...")
-                progress.update(progress=50)
-
-                result = convert_jsonl_to_html(
-                    input_path=input_path,
-                    output_path=output_path,
-                    from_date=from_date,
-                    to_date=to_date,
-                    generate_individual_sessions=not skip_sessions,
-                )
-
-                progress.update(progress=90)
-
-                if result:
-                    self.add_log(f"Done! Output: {result}")
-                    progress.update(progress=100)
-
-                    if open_browser:
-                        webbrowser.open(f"file://{result}")
-
-                    self.notify("Conversion complete!")
-                else:
-                    self.add_log("Conversion failed")
-                    self.notify("Conversion failed", severity="error")
+            except Exception as e:
+                self.add_log(f"Error: {e}")
+                self.notify(f"Error: {e}", severity="error")
 
         except Exception as e:
             self.add_log(f"Error: {e}")

@@ -9,7 +9,7 @@ from typing import cast
 from unittest.mock import Mock, patch
 
 import pytest
-from textual.widgets import Button, Checkbox, Input, Label, Select, Static, Switch
+from textual.widgets import Button, Checkbox, Input, Label, Static, Switch
 
 from claude_code_log.cache import CacheManager, SessionCacheData
 from claude_code_log.tui import ClaudeCodeLogTUI, SessionBrowser, run_session_browser, run_tui
@@ -107,7 +107,7 @@ class TestClaudeCodeLogTUI:
 
             # Check that main UI elements exist
             assert app.query_one("#title-label", Label)
-            assert app.query_one("#mode-select", Select)
+            assert app.query_one("#projects-section")  # Projects section always visible
             assert app.query_one("#convert-btn", Button)
             assert app.query_one("#upload-btn", Button)  # Upload to Google button
             assert app.query_one("#status-log", Static)
@@ -125,24 +125,16 @@ class TestClaudeCodeLogTUI:
             assert "Upload" in str(upload_btn.label)
 
     @pytest.mark.asyncio
-    async def test_mode_selection(self, temp_project_dir):
-        """Test mode selection switching between All Projects and Directory."""
+    async def test_projects_section_visible(self, temp_project_dir):
+        """Test that projects section is visible by default."""
         app = ClaudeCodeLogTUI(temp_project_dir)
 
         async with app.run_test() as pilot:
             await pilot.pause(0.1)
 
-            # Initially should be All Projects mode
-            mode_select = app.query_one("#mode-select", Select)
-            assert mode_select.value == "all"
-
             # Projects section should be visible
             projects_section = app.query_one("#projects-section")
             assert projects_section.display
-
-            # Switch to Directory mode
-            mode_select.value = "directory"
-            await pilot.pause(0.1)
 
     @pytest.mark.asyncio
     async def test_options_switches(self, temp_project_dir):
@@ -604,7 +596,7 @@ class TestIntegration:
 
                 # Check UI elements
                 assert app.query_one("#title-label", Label)
-                assert app.query_one("#mode-select", Select)
+                assert app.query_one("#projects-section")  # Projects always visible
                 assert app.query_one("#convert-btn", Button)
 
                 # Toggle options
