@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the TUI module."""
+"""Tests for the TUI module - Desktop App Style Converter."""
 
 import json
 import sys
@@ -9,11 +9,10 @@ from typing import cast
 from unittest.mock import Mock, patch
 
 import pytest
-from textual.css.query import NoMatches
-from textual.widgets import DataTable, Label
+from textual.widgets import Button, Checkbox, Input, Label, Select, Static, Switch
 
 from claude_code_log.cache import CacheManager, SessionCacheData
-from claude_code_log.tui import SessionBrowser, run_session_browser
+from claude_code_log.tui import ClaudeCodeLogTUI, SessionBrowser, run_session_browser, run_tui
 
 
 @pytest.fixture
@@ -67,24 +66,6 @@ def temp_project_dir():
                 "version": "1.0.0",
                 "requestId": "req-123",
             },
-            {
-                "type": "user",
-                "sessionId": "session-456",
-                "timestamp": "2025-01-02T14:30:00Z",
-                "uuid": "user-uuid-2",
-                "message": {"role": "user", "content": "This is a different session"},
-                "parentUuid": None,
-                "isSidechain": False,
-                "userType": "human",
-                "cwd": "/test",
-                "version": "1.0.0",
-                "isMeta": False,
-            },
-            {
-                "type": "summary",
-                "summary": "User asked about session management",
-                "leafUuid": "user-uuid-2",
-            },
         ]
 
         # Write test data to JSONL file
@@ -97,611 +78,348 @@ def temp_project_dir():
 
 
 @pytest.mark.tui
-class TestSessionBrowser:
-    """Test cases for the SessionBrowser TUI application."""
+class TestClaudeCodeLogTUI:
+    """Test cases for the ClaudeCodeLogTUI application."""
 
     def test_init(self, temp_project_dir):
-        """Test SessionBrowser initialization."""
-        app = SessionBrowser(temp_project_dir)
+        """Test ClaudeCodeLogTUI initialization."""
+        app = ClaudeCodeLogTUI(temp_project_dir)
         assert app.project_path == temp_project_dir
         assert app.sessions == {}
         assert app.selected_session_id is None
+        assert app.projects == []
+        assert app.project_checkboxes == []
+        assert app.log_messages == []
+
+    def test_init_no_project_path(self):
+        """Test ClaudeCodeLogTUI initialization without project path."""
+        app = ClaudeCodeLogTUI()
+        assert app.project_path is None
+        assert app.sessions == {}
 
     @pytest.mark.asyncio
-    async def test_load_sessions_from_cache(self, temp_project_dir):
-        """Test loading sessions from cache when available and no files modified."""
-        # Mock cached session data
-        mock_session_data = {
-            "session-123": SessionCacheData(
-                session_id="session-123",
-                first_timestamp="2025-01-01T10:00:00Z",
-                last_timestamp="2025-01-01T10:01:00Z",
-                message_count=2,
-                first_user_message="Hello, this is my first message",
-                total_input_tokens=10,
-                total_output_tokens=15,
-            )
-        }
-
-        mock_cache_manager = Mock(spec=CacheManager)
-        mock_cache_manager.get_cached_project_data.return_value = Mock(
-            sessions=mock_session_data, working_directories=[str(temp_project_dir)]
-        )
-        mock_cache_manager.get_modified_files.return_value = []  # No modified files
-
-        with patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager):
-            app = SessionBrowser(temp_project_dir)
-
-            async with app.run_test() as pilot:
-                # Wait for the app to load
-                await pilot.pause(0.1)
-
-                # Check that sessions were loaded from cache
-                assert len(app.sessions) == 1
-                assert "session-123" in app.sessions
-                assert app.sessions["session-123"].message_count == 2
-
-    @pytest.mark.asyncio
-    async def test_load_sessions_with_modified_files(self, temp_project_dir):
-        """Test loading sessions when files have been modified since cache."""
-        # Mock the updated cache data after rebuild
-        updated_mock_session_data = {
-            "session-123": SessionCacheData(
-                session_id="session-123",
-                first_timestamp="2025-01-01T10:00:00Z",
-                last_timestamp="2025-01-01T10:01:00Z",
-                message_count=2,
-                first_user_message="Hello, this is my first message",
-                total_input_tokens=10,
-                total_output_tokens=15,
-            ),
-            "session-456": SessionCacheData(
-                session_id="session-456",
-                first_timestamp="2025-01-02T14:30:00Z",
-                last_timestamp="2025-01-02T14:30:00Z",
-                message_count=1,
-                first_user_message="This is a different session",
-                total_input_tokens=0,
-                total_output_tokens=0,
-            ),
-        }
-
-        modified_file = temp_project_dir / "test-transcript.jsonl"
-
-        mock_cache_manager = Mock(spec=CacheManager)
-        # Return updated cache data (simulating cache after rebuild)
-        mock_cache_manager.get_cached_project_data.return_value = Mock(
-            sessions=updated_mock_session_data,
-            working_directories=[str(temp_project_dir)],
-        )
-        mock_cache_manager.get_modified_files.return_value = [modified_file]  # One modified file
-
-        with (
-            patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager),
-            patch("claude_code_log.tui.ensure_fresh_cache") as mock_ensure,
-        ):
-            app = SessionBrowser(temp_project_dir)
-
-            async with app.run_test() as pilot:
-                # Wait for the app to load and rebuild cache
-                await pilot.pause(1.0)
-
-                # Check that convert function was called due to modified files
-                mock_ensure.assert_called()
-
-                # Check that sessions were rebuilt from JSONL files
-                assert len(app.sessions) >= 2  # Should have session-123 and session-456
-                assert "session-123" in app.sessions
-                assert "session-456" in app.sessions
-
-    @pytest.mark.asyncio
-    async def test_load_sessions_build_cache(self, temp_project_dir):
-        """Test loading sessions when cache needs to be built."""
-        # Mock the cache data that will be available after building
-        built_cache_data = {
-            "session-123": SessionCacheData(
-                session_id="session-123",
-                first_timestamp="2025-01-01T10:00:00Z",
-                last_timestamp="2025-01-01T10:01:00Z",
-                message_count=2,
-                first_user_message="Hello, this is my first message",
-                total_input_tokens=10,
-                total_output_tokens=15,
-            ),
-            "session-456": SessionCacheData(
-                session_id="session-456",
-                first_timestamp="2025-01-02T14:30:00Z",
-                last_timestamp="2025-01-02T14:30:00Z",
-                message_count=1,
-                first_user_message="This is a different session",
-                total_input_tokens=0,
-                total_output_tokens=0,
-            ),
-        }
-
-        mock_cache_manager = Mock(spec=CacheManager)
-        # Return built cache data (simulating cache after building)
-        mock_cache_manager.get_cached_project_data.return_value = Mock(
-            sessions=built_cache_data,
-            working_directories=[str(temp_project_dir)],
-        )
-        mock_cache_manager.get_modified_files.return_value = []  # No modified files
-
-        with (
-            patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager),
-            patch("claude_code_log.tui.ensure_fresh_cache") as mock_ensure,
-        ):
-            app = SessionBrowser(temp_project_dir)
-
-            async with app.run_test() as pilot:
-                # Wait for the app to load and build cache
-                await pilot.pause(1.0)
-
-                # Check that sessions were loaded
-                assert len(app.sessions) >= 2  # Should have session-123 and session-456
-                assert "session-123" in app.sessions
-                assert "session-456" in app.sessions
-
-    @pytest.mark.asyncio
-    async def test_populate_table(self, temp_project_dir):
-        """Test that the sessions table is populated correctly."""
-        # Mock session data - testing summary prioritization
-        mock_session_data = {
-            "session-123": SessionCacheData(
-                session_id="session-123",
-                summary="Session with Claude-generated summary",  # Should be displayed
-                first_timestamp="2025-01-01T10:00:00Z",
-                last_timestamp="2025-01-01T10:01:00Z",
-                message_count=2,
-                first_user_message="Hello, this is my first message",
-                total_input_tokens=10,
-                total_output_tokens=15,
-                cwd="/test/project",
-            ),
-            "session-456": SessionCacheData(
-                session_id="session-456",
-                summary=None,  # No summary, should fall back to first_user_message
-                first_timestamp="2025-01-02T14:30:00Z",
-                last_timestamp="2025-01-02T14:30:00Z",
-                message_count=1,
-                first_user_message="This is a different session",
-                total_input_tokens=0,
-                total_output_tokens=0,
-                cwd="/test/other",
-            ),
-        }
-
-        mock_cache_manager = Mock(spec=CacheManager)
-        mock_cache_manager.get_cached_project_data.return_value = Mock(
-            sessions=mock_session_data, working_directories=[str(temp_project_dir)]
-        )
-        mock_cache_manager.get_modified_files.return_value = []  # No modified files
-
-        with patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager):
-            app = SessionBrowser(temp_project_dir)
-
-            async with app.run_test() as pilot:
-                await pilot.pause(0.1)
-
-                # Get the data table
-                table = cast(DataTable, app.query_one("#sessions-table"))
-
-                # Check that table has correct number of rows
-                assert table.row_count == 2
-
-                # Check column headers - Textual 4.x API
-                columns = table.columns
-                assert len(columns) == 6
-                # Check that columns exist (column access varies in Textual versions)
-                assert table.row_count == 2
-
-    @pytest.mark.asyncio
-    async def test_row_selection(self, temp_project_dir):
-        """Test selecting a row in the sessions table."""
-        # Mock session data
-        mock_session_data = {
-            "session-123": SessionCacheData(
-                session_id="session-123",
-                first_timestamp="2025-01-01T10:00:00Z",
-                last_timestamp="2025-01-01T10:01:00Z",
-                message_count=2,
-                first_user_message="Hello, this is my first message",
-                total_input_tokens=10,
-                total_output_tokens=15,
-            )
-        }
-
-        mock_cache_manager = Mock(spec=CacheManager)
-        mock_cache_manager.get_cached_project_data.return_value = Mock(
-            sessions=mock_session_data, working_directories=[str(temp_project_dir)]
-        )
-        mock_cache_manager.get_modified_files.return_value = []  # No modified files
-
-        with patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager):
-            app = SessionBrowser(temp_project_dir)
-
-            async with app.run_test() as pilot:
-                await pilot.pause(0.1)
-
-                # Select the first row
-                await pilot.click("#sessions-table")
-                await pilot.press("enter")
-
-                # Check that selection was handled
-                assert app.selected_session_id is not None
-
-    @pytest.mark.asyncio
-    async def test_export_action_no_html_file(self, temp_project_dir):
-        """Test export action when HTML file doesn't exist."""
-        app = SessionBrowser(temp_project_dir)
-
-        with patch("claude_code_log.tui.webbrowser.open") as mock_browser:
-            async with app.run_test() as pilot:
-                await pilot.pause()
-
-                # Try to export without HTML file existing
-                app.action_export_selected()
-
-                # Browser should not have been opened (file doesn't exist)
-                mock_browser.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_export_action_with_html_file(self, temp_project_dir):
-        """Test export action opens combined_transcripts.html."""
-        # Create the combined_transcripts.html file
-        html_file = temp_project_dir / "combined_transcripts.html"
-        html_file.write_text("<html></html>")
-
-        app = SessionBrowser(temp_project_dir)
-
-        with patch("claude_code_log.tui.webbrowser.open") as mock_browser:
-            async with app.run_test() as pilot:
-                await pilot.pause(0.1)
-
-                # Test export action
-                app.action_export_selected()
-
-                # Check that browser was opened with combined_transcripts.html
-                mock_browser.assert_called_once_with(f"file://{html_file}")
-
-    @pytest.mark.asyncio
-    async def test_resume_action_no_selection(self, temp_project_dir):
-        """Test resume action when no session is selected."""
-        app = SessionBrowser(temp_project_dir)
+    async def test_app_startup(self, temp_project_dir):
+        """Test that the app starts up correctly."""
+        app = ClaudeCodeLogTUI(temp_project_dir)
 
         async with app.run_test() as pilot:
-            await pilot.pause()
+            await pilot.pause(0.1)
 
-            # Manually clear the selection (since DataTable auto-selects first row)
-            app.selected_session_id = None
-
-            # Try to resume without selecting a session
-            app.action_resume_selected()
-
-            # Should still have no selection (action should not change it)
-            assert app.selected_session_id is None
+            # Check that main UI elements exist
+            assert app.query_one("#title-label", Label)
+            assert app.query_one("#mode-select", Select)
+            assert app.query_one("#convert-btn", Button)
+            assert app.query_one("#status-log", Static)
 
     @pytest.mark.asyncio
-    async def test_resume_action_with_selection(self, temp_project_dir):
-        """Test resume action with a selected session."""
-        app = SessionBrowser(temp_project_dir)
-        app.selected_session_id = "session-123"
+    async def test_mode_selection(self, temp_project_dir):
+        """Test mode selection switching between All Projects and Directory."""
+        app = ClaudeCodeLogTUI(temp_project_dir)
 
-        with (
-            patch("claude_code_log.tui.os.execvp") as mock_execvp,
-            patch.object(app, "suspend") as mock_suspend,
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+
+            # Initially should be All Projects mode
+            mode_select = app.query_one("#mode-select", Select)
+            assert mode_select.value == "all"
+
+            # Projects section should be visible
+            projects_section = app.query_one("#projects-section")
+            assert projects_section.display
+
+            # Switch to Directory mode
+            mode_select.value = "directory"
+            await pilot.pause(0.1)
+
+    @pytest.mark.asyncio
+    async def test_options_switches(self, temp_project_dir):
+        """Test options switches."""
+        app = ClaudeCodeLogTUI(temp_project_dir)
+
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+
+            # Get options switches
+            browser_switch = app.query_one("#opt-browser", Switch)
+            skip_switch = app.query_one("#opt-skip", Switch)
+            cache_switch = app.query_one("#opt-cache", Switch)
+
+            # Check default values
+            assert browser_switch.value is True
+            assert skip_switch.value is False
+            assert cache_switch.value is False
+
+            # Toggle switches
+            browser_switch.value = False
+            skip_switch.value = True
+            cache_switch.value = True
+
+            assert browser_switch.value is False
+            assert skip_switch.value is True
+            assert cache_switch.value is True
+
+    @pytest.mark.asyncio
+    async def test_date_inputs(self, temp_project_dir):
+        """Test date input fields."""
+        app = ClaudeCodeLogTUI(temp_project_dir)
+
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+
+            # Get date inputs
+            from_date = app.query_one("#from-date", Input)
+            to_date = app.query_one("#to-date", Input)
+
+            # From date should be empty by default
+            assert from_date.value == ""
+
+            # To date should have today's date
+            assert to_date.value != ""
+
+            # Test setting values
+            from_date.value = "01/01/2025"
+            assert from_date.value == "01/01/2025"
+
+    @pytest.mark.asyncio
+    async def test_clear_date_buttons(self, temp_project_dir):
+        """Test clear date buttons."""
+        app = ClaudeCodeLogTUI(temp_project_dir)
+
+        async with app.run_test(size=(120, 80)) as pilot:
+            await pilot.pause(0.1)
+
+            # Set a from date
+            from_date = app.query_one("#from-date", Input)
+            from_date.value = "01/01/2025"
+
+            # Click clear button
+            await pilot.click("#clear-from")
+            await pilot.pause(0.1)
+
+            # Date should be cleared
+            assert from_date.value == ""
+
+    @pytest.mark.asyncio
+    async def test_output_path_input(self, temp_project_dir):
+        """Test output path input."""
+        app = ClaudeCodeLogTUI(temp_project_dir)
+
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+
+            output_path = app.query_one("#output-path", Input)
+            assert output_path.value == ""
+
+            output_path.value = "/custom/output/path"
+            assert output_path.value == "/custom/output/path"
+
+    @pytest.mark.asyncio
+    async def test_log_function(self, temp_project_dir):
+        """Test the add_log function."""
+        app = ClaudeCodeLogTUI(temp_project_dir)
+
+        async with app.run_test(size=(120, 80)) as pilot:
+            await pilot.pause(0.1)
+
+            # Log a message
+            app.add_log("Test message 1")
+            app.add_log("Test message 2")
+
+            # Check log messages list
+            assert len(app.log_messages) >= 2
+            assert any("Test message 2" in msg for msg in app.log_messages)
+            assert any("Test message 1" in msg for msg in app.log_messages)
+
+    @pytest.mark.asyncio
+    async def test_clear_log_button(self, temp_project_dir):
+        """Test clear log button."""
+        app = ClaudeCodeLogTUI(temp_project_dir)
+
+        async with app.run_test(size=(120, 80)) as pilot:
+            await pilot.pause(0.1)
+
+            # Add some log messages
+            app.add_log("Test message")
+            initial_count = len(app.log_messages)
+            assert initial_count > 0
+
+            # Click clear button
+            await pilot.click("#clear-btn")
+            await pilot.pause(0.1)
+
+            # Log should be cleared
+            assert len(app.log_messages) == 0
+
+    @pytest.mark.asyncio
+    async def test_refresh_button(self, temp_project_dir):
+        """Test refresh button."""
+        mock_projects = [
+            {
+                "path": temp_project_dir,
+                "name": temp_project_dir.name,
+                "session_count": 1,
+                "message_count": 2,
+                "last_modified": "2025-01-01 10:00",
+            }
+        ]
+
+        with patch(
+            "claude_code_log.tui.discover_projects_with_sessions",
+            return_value=mock_projects,
         ):
-            # Make suspend work as a context manager that executes the body
-            mock_suspend.return_value.__enter__ = Mock(return_value=None)
-            mock_suspend.return_value.__exit__ = Mock(return_value=False)
+            app = ClaudeCodeLogTUI(temp_project_dir)
 
             async with app.run_test() as pilot:
                 await pilot.pause(0.1)
 
-                # Test resume action
-                app.action_resume_selected()
-
-                # Check that suspend was called
-                mock_suspend.assert_called_once()
-                # Check that execvp was called with correct arguments
-                mock_execvp.assert_called_once_with(
-                    "claude", ["claude", "-r", "session-123"]
-                )
-
-    @pytest.mark.asyncio
-    async def test_resume_action_command_not_found(self, temp_project_dir):
-        """Test resume action when Claude CLI is not found."""
-        app = SessionBrowser(temp_project_dir)
-        app.selected_session_id = "session-123"
-
-        with (
-            patch("claude_code_log.tui.os.execvp") as mock_execvp,
-            patch.object(app, "suspend") as mock_suspend,
-        ):
-            mock_execvp.side_effect = FileNotFoundError()
-            # Make suspend work as a context manager that executes the body
-            mock_suspend.return_value.__enter__ = Mock(return_value=None)
-            mock_suspend.return_value.__exit__ = Mock(return_value=False)
-
-            async with app.run_test() as pilot:
+                # Click refresh button
+                await pilot.click("#refresh-btn")
                 await pilot.pause(0.1)
 
-                # Test resume action
-                app.action_resume_selected()
-
-                # Should handle the error gracefully
-                mock_suspend.assert_called_once()
-                mock_execvp.assert_called_once()
+                # Projects should be refreshed
+                assert len(app.projects) == 1
 
     @pytest.mark.asyncio
-    async def test_refresh_action(self, temp_project_dir):
-        """Test refresh action - no longer applicable since refresh button was removed."""
-        # This test is no longer applicable since the refresh action was removed
-        # The TUI now automatically handles cache updates when needed
-        app = SessionBrowser(temp_project_dir)
+    async def test_select_all_deselect_all(self, temp_project_dir):
+        """Test select all and deselect all buttons."""
+        mock_projects = [
+            {
+                "path": temp_project_dir / "project1",
+                "name": "project1",
+                "session_count": 1,
+                "message_count": 2,
+                "last_modified": "2025-01-01 10:00",
+            },
+            {
+                "path": temp_project_dir / "project2",
+                "name": "project2",
+                "session_count": 2,
+                "message_count": 5,
+                "last_modified": "2025-01-02 10:00",
+            },
+        ]
 
-        async with app.run_test() as pilot:
-            await pilot.pause()
-            # Test that the app loads properly without refresh functionality
-            assert len(app.sessions) >= 0  # Just ensure sessions are loaded
+        with patch(
+            "claude_code_log.tui.discover_projects_with_sessions",
+            return_value=mock_projects,
+        ):
+            app = ClaudeCodeLogTUI(temp_project_dir)
+
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+
+                # Select all
+                await pilot.click("#select-all-btn")
+                await pilot.pause(0.1)
+
+                for cb in app.project_checkboxes:
+                    assert cb.value is True
+
+                # Deselect all
+                await pilot.click("#deselect-btn")
+                await pilot.pause(0.1)
+
+                for cb in app.project_checkboxes:
+                    assert cb.value is False
 
     @pytest.mark.asyncio
-    async def test_button_actions(self, temp_project_dir):
-        """Test button press events - no longer applicable since buttons were removed."""
-        # This test is no longer applicable since the buttons were removed
-        # Actions are now only triggered via keyboard shortcuts
-        app = SessionBrowser(temp_project_dir)
+    async def test_convert_no_projects_selected(self, temp_project_dir):
+        """Test convert with no projects selected shows error."""
+        with patch(
+            "claude_code_log.tui.discover_projects_with_sessions",
+            return_value=[],
+        ):
+            app = ClaudeCodeLogTUI(temp_project_dir)
 
-        async with app.run_test() as pilot:
-            await pilot.pause()
+            async with app.run_test(size=(120, 80)) as pilot:
+                await pilot.pause(0.2)
 
-            # Test that the app loads without buttons
-            sessions_table = app.query_one("#sessions-table")
-            assert sessions_table is not None
+                # Clear log messages before test
+                app.log_messages = []
 
-            # Test that the interface loads without the removed buttons
-            try:
-                app.query_one("#export-btn")
-                assert False, "Export button should not exist"
-            except NoMatches:
-                pass  # Expected - button was removed
+                # Try to convert directly (Enter key may be captured by Input widgets)
+                app._do_convert()
+                await pilot.pause(1.0)  # Wait for async worker
 
-    def test_summary_prioritization(self, temp_project_dir):
-        """Test that summaries are prioritized over first user messages in display."""
-
-        # Test session with summary
-        session_with_summary = SessionCacheData(
-            session_id="session-with-summary",
-            summary="This is a Claude-generated summary",
-            first_timestamp="2025-01-01T10:00:00Z",
-            last_timestamp="2025-01-01T10:01:00Z",
-            message_count=2,
-            first_user_message="This should not be displayed",
-            cwd="/test/project",
-        )
-
-        # Test session without summary
-        session_without_summary = SessionCacheData(
-            session_id="session-without-summary",
-            summary=None,
-            first_timestamp="2025-01-01T10:00:00Z",
-            last_timestamp="2025-01-01T10:01:00Z",
-            message_count=2,
-            first_user_message="This should be displayed",
-            cwd="/test/project",
-        )
-
-        # Test the preview generation logic from populate_table
-        # Session with summary should show summary
-        preview_with_summary = (
-            session_with_summary.summary
-            or session_with_summary.first_user_message
-            or "No preview available"
-        )
-        assert preview_with_summary == "This is a Claude-generated summary"
-
-        # Session without summary should show first user message
-        preview_without_summary = (
-            session_without_summary.summary
-            or session_without_summary.first_user_message
-            or "No preview available"
-        )
-        assert preview_without_summary == "This should be displayed"
-
-    def test_format_timestamp(self, temp_project_dir):
-        """Test timestamp formatting."""
-        mock_cache_manager = Mock(spec=CacheManager)
-        mock_cache_manager.get_cached_project_data.return_value = None
-        mock_cache_manager.get_modified_files.return_value = []
-
-        with patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager):
-            app = SessionBrowser(temp_project_dir)
-
-            # Test valid timestamp
-            formatted = app.format_timestamp("2025-01-01T10:00:00Z")
-            assert formatted == "01-01 10:00"
-
-            # Test invalid timestamp
-            formatted_invalid = app.format_timestamp("invalid")
-            assert formatted_invalid == "Unknown"
+                # Should have logged an error (with "Error:" prefix)
+                assert any("No projects selected" in msg for msg in app.log_messages), \
+                    f"Expected error message not found. Log messages: {app.log_messages}"
 
     @pytest.mark.asyncio
     async def test_keyboard_shortcuts(self, temp_project_dir):
         """Test keyboard shortcuts."""
-        app = SessionBrowser(temp_project_dir)
-        app.selected_session_id = "session-123"
+        app = ClaudeCodeLogTUI(temp_project_dir)
 
-        with (
-            patch.object(app, "action_export_selected") as mock_export,
-            patch.object(app, "action_resume_selected") as mock_resume,
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+
+            # Test help shortcut
+            await pilot.press("?")
+            await pilot.pause(0.1)
+
+            # Should show help notification (handled by app)
+
+    @pytest.mark.asyncio
+    async def test_action_select_all(self, temp_project_dir):
+        """Test action_select_all method."""
+        mock_projects = [
+            {
+                "path": temp_project_dir / "project1",
+                "name": "project1",
+                "session_count": 1,
+                "message_count": 2,
+                "last_modified": "2025-01-01 10:00",
+            },
+        ]
+
+        with patch(
+            "claude_code_log.tui.discover_projects_with_sessions",
+            return_value=mock_projects,
         ):
+            app = ClaudeCodeLogTUI(temp_project_dir)
+
             async with app.run_test() as pilot:
+                await pilot.pause(0.2)
+
+                # Use keyboard shortcut for select all
+                await pilot.press("a")
                 await pilot.pause(0.1)
 
-                # Test keyboard shortcuts
-                await pilot.press("h")  # Export
-                await pilot.press("c")  # Resume
-
-                # Check that actions were called
-                mock_export.assert_called_once()
-                mock_resume.assert_called_once()
+                for cb in app.project_checkboxes:
+                    assert cb.value is True
 
     @pytest.mark.asyncio
-    async def test_terminal_resize(self, temp_project_dir):
-        """Test that the TUI properly handles terminal resizing."""
-        # Mock session data
-        mock_session_data = {
-            "session-123": SessionCacheData(
-                session_id="session-123",
-                first_timestamp="2025-01-01T10:00:00Z",
-                last_timestamp="2025-01-01T10:01:00Z",
-                message_count=2,
-                first_user_message="Hello, this is my first message",
-                total_input_tokens=10,
-                total_output_tokens=15,
-            ),
-            "session-456": SessionCacheData(
-                session_id="session-456",
-                first_timestamp="2025-01-02T14:30:00Z",
-                last_timestamp="2025-01-02T14:30:00Z",
-                message_count=1,
-                first_user_message="This is a different session with a very long title that should be truncated",
-                total_input_tokens=0,
-                total_output_tokens=0,
-            ),
-        }
+    async def test_action_deselect_all(self, temp_project_dir):
+        """Test action_deselect_all method."""
+        mock_projects = [
+            {
+                "path": temp_project_dir / "project1",
+                "name": "project1",
+                "session_count": 1,
+                "message_count": 2,
+                "last_modified": "2025-01-01 10:00",
+            },
+        ]
 
-        mock_cache_manager = Mock(spec=CacheManager)
-        mock_cache_manager.get_cached_project_data.return_value = Mock(
-            sessions=mock_session_data, working_directories=[str(temp_project_dir)]
-        )
-        mock_cache_manager.get_modified_files.return_value = []  # No modified files
+        with patch(
+            "claude_code_log.tui.discover_projects_with_sessions",
+            return_value=mock_projects,
+        ):
+            app = ClaudeCodeLogTUI(temp_project_dir)
 
-        with patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager):
-            app = SessionBrowser(temp_project_dir)
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
 
-            async with app.run_test(size=(120, 40)) as pilot:
+                # First select all
+                await pilot.press("a")
                 await pilot.pause(0.1)
 
-                # Set up session data manually
-                app.sessions = mock_session_data
-                app.populate_sessions_table()
-                app.update_stats()
-
-                # Get initial table state
-                table = cast(DataTable, app.query_one("#sessions-table"))
-                initial_columns = table.columns
-                initial_column_count = len(initial_columns)
-
-                # Verify the table has the correct number of rows
-                assert table.row_count == 2
-
-                # Check that columns exist
-                assert initial_column_count == 6
-
-    @pytest.mark.asyncio
-    async def test_column_width_calculation(self, temp_project_dir):
-        """Test that column widths are calculated correctly for different terminal sizes."""
-        # Mock session data
-        mock_session_data = {
-            "session-123": SessionCacheData(
-                session_id="session-123",
-                first_timestamp="2025-01-01T10:00:00Z",
-                last_timestamp="2025-01-01T10:01:00Z",
-                message_count=2,
-                first_user_message="Hello, this is my first message",
-                total_input_tokens=10,
-                total_output_tokens=15,
-            ),
-        }
-
-        mock_cache_manager = Mock(spec=CacheManager)
-        mock_cache_manager.get_cached_project_data.return_value = Mock(
-            sessions=mock_session_data, working_directories=[str(temp_project_dir)]
-        )
-        mock_cache_manager.get_modified_files.return_value = []  # No modified files
-
-        # Test wide terminal (120 columns)
-        with patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager):
-            app_wide = SessionBrowser(temp_project_dir)
-
-            async with app_wide.run_test(size=(120, 40)) as pilot:
+                # Then deselect all
+                await pilot.press("d")
                 await pilot.pause(0.1)
 
-                app_wide.sessions = mock_session_data
-                app_wide.populate_sessions_table()
-
-                # Check that the table was populated correctly
-                table = cast(DataTable, app_wide.query_one("#sessions-table"))
-                assert table.row_count == 1
-
-        # Test narrow terminal (80 columns) - separate app instance
-        with patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager):
-            app_narrow = SessionBrowser(temp_project_dir)
-
-            async with app_narrow.run_test(size=(80, 40)) as pilot:
-                await pilot.pause(0.1)
-
-                app_narrow.sessions = mock_session_data
-                app_narrow.populate_sessions_table()
-
-                # Check that the table was populated correctly
-                table = cast(DataTable, app_narrow.query_one("#sessions-table"))
-                assert table.row_count == 1
-
-    @pytest.mark.asyncio
-    async def test_stats_layout_responsiveness(self, temp_project_dir):
-        """Test that stats layout switches between single-row and multi-row based on terminal width."""
-        # Mock session data
-        mock_session_data = {
-            "session-123": SessionCacheData(
-                session_id="session-123",
-                first_timestamp="2025-01-01T10:00:00Z",
-                last_timestamp="2025-01-01T10:01:00Z",
-                message_count=2,
-                first_user_message="Hello, this is my first message",
-                total_input_tokens=10,
-                total_output_tokens=15,
-            ),
-        }
-
-        mock_cache_manager = Mock(spec=CacheManager)
-        mock_cache_manager.get_cached_project_data.return_value = Mock(
-            sessions=mock_session_data, working_directories=[str(temp_project_dir)]
-        )
-        mock_cache_manager.get_modified_files.return_value = []  # No modified files
-
-        # Test wide terminal (should use single-row layout)
-        with patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager):
-            app_wide = SessionBrowser(temp_project_dir)
-
-            async with app_wide.run_test(size=(130, 40)) as pilot:
-                await pilot.pause(0.1)
-
-                app_wide.sessions = mock_session_data
-                app_wide.update_stats()
-
-                stats = cast(Label, app_wide.query_one("#stats"))
-                stats_text = str(stats.content)
-
-                # Wide terminal should display session info
-                assert "Sessions:" in stats_text
-
-        # Test narrow terminal (should use multi-row layout) - separate app instance
-        with patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager):
-            app_narrow = SessionBrowser(temp_project_dir)
-
-            async with app_narrow.run_test(size=(80, 40)) as pilot:
-                await pilot.pause(0.1)
-
-                app_narrow.sessions = mock_session_data
-                app_narrow.update_stats()
-
-                stats = cast(Label, app_narrow.query_one("#stats"))
-                stats_text = str(stats.content)
-
-                # Narrow terminal should also display session info
-                assert "Sessions:" in stats_text
+                for cb in app.project_checkboxes:
+                    assert cb.value is False
 
 
 @pytest.mark.tui
@@ -709,41 +427,137 @@ class TestRunSessionBrowser:
     """Test cases for the run_session_browser function."""
 
     def test_run_session_browser_nonexistent_path(self, capsys):
-        """Test running session browser with nonexistent path."""
-        fake_path = Path("/nonexistent/path")
-        run_session_browser(fake_path)
+        """Test run_session_browser with non-existent path."""
+        result = run_session_browser(Path("/nonexistent/path"))
+        assert result is None
 
         captured = capsys.readouterr()
-        assert "Error: Project path" in captured.out
         assert "does not exist" in captured.out
 
-    def test_run_session_browser_not_directory(self, capsys, temp_project_dir):
-        """Test running session browser with a file instead of directory."""
-        # Create a file
-        test_file = temp_project_dir / "test.txt"
-        test_file.write_text("test")
-
-        run_session_browser(test_file)
-
-        captured = capsys.readouterr()
-        assert "is not a directory" in captured.out
-
-    def test_run_session_browser_no_jsonl_files(self, capsys):
-        """Test running session browser with directory containing no JSONL files."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            empty_path = Path(temp_dir)
-            run_session_browser(empty_path)
+    def test_run_session_browser_not_directory(self, capsys):
+        """Test run_session_browser with a file instead of directory."""
+        with tempfile.NamedTemporaryFile(suffix=".txt") as tmp_file:
+            result = run_session_browser(Path(tmp_file.name))
+            assert result is None
 
             captured = capsys.readouterr()
-            assert "No JSONL transcript files found" in captured.out
+            assert "not a directory" in captured.out
+
+    def test_run_session_browser_no_jsonl_files(self, capsys):
+        """Test run_session_browser with directory without JSONL files."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = run_session_browser(Path(temp_dir))
+            assert result is None
+
+            captured = capsys.readouterr()
+            assert "No JSONL" in captured.out
 
     def test_run_session_browser_success(self, temp_project_dir):
-        """Test successful run of session browser."""
-        with patch("claude_code_log.tui.SessionBrowser.run") as mock_run:
-            run_session_browser(temp_project_dir)
+        """Test run_session_browser creates app with correct path."""
+        with patch.object(ClaudeCodeLogTUI, "run", return_value="test_result"):
+            result = run_session_browser(temp_project_dir)
+            assert result == "test_result"
 
-            # Should create and run the app
-            mock_run.assert_called_once()
+
+@pytest.mark.tui
+class TestRunTUI:
+    """Test cases for the run_tui function."""
+
+    def test_run_tui_no_path(self):
+        """Test run_tui without path."""
+        with patch.object(ClaudeCodeLogTUI, "run", return_value=None):
+            result = run_tui()
+            assert result is None
+
+    def test_run_tui_with_path(self, temp_project_dir):
+        """Test run_tui with project path."""
+        with patch.object(ClaudeCodeLogTUI, "run", return_value="test_result"):
+            result = run_tui(temp_project_dir)
+            assert result == "test_result"
+
+
+@pytest.mark.tui
+class TestLegacyAlias:
+    """Test that legacy SessionBrowser alias works."""
+
+    def test_session_browser_alias(self):
+        """Test that SessionBrowser is an alias for ClaudeCodeLogTUI."""
+        assert SessionBrowser is ClaudeCodeLogTUI
+
+    def test_session_browser_init(self, temp_project_dir):
+        """Test SessionBrowser initialization."""
+        app = SessionBrowser(temp_project_dir)
+        assert isinstance(app, ClaudeCodeLogTUI)
+        assert app.project_path == temp_project_dir
+
+
+@pytest.mark.tui
+class TestDiscoverProjectsWithSessions:
+    """Test cases for discover_projects_with_sessions function."""
+
+    def test_discover_empty_directory(self):
+        """Test discover with empty directory."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            from claude_code_log.tui import discover_projects_with_sessions
+
+            result = discover_projects_with_sessions(Path(temp_dir))
+            assert result == []
+
+    def test_discover_nonexistent_directory(self):
+        """Test discover with non-existent directory."""
+        from claude_code_log.tui import discover_projects_with_sessions
+
+        result = discover_projects_with_sessions(Path("/nonexistent/path"))
+        assert result == []
+
+    def test_discover_with_projects(self, temp_project_dir):
+        """Test discover with projects."""
+        from claude_code_log.tui import discover_projects_with_sessions
+
+        # Create a projects directory structure
+        projects_dir = temp_project_dir / "projects"
+        projects_dir.mkdir()
+
+        # Create a project with JSONL file
+        project1 = projects_dir / "project1"
+        project1.mkdir()
+        jsonl_file = project1 / "test.jsonl"
+        jsonl_file.write_text('{"type": "user", "message": "test"}\n')
+
+        result = discover_projects_with_sessions(projects_dir)
+        assert len(result) == 1
+        assert result[0]["name"] == "project1"
+
+    def test_discover_skips_hidden_directories(self, temp_project_dir):
+        """Test that hidden directories are skipped."""
+        from claude_code_log.tui import discover_projects_with_sessions
+
+        projects_dir = temp_project_dir / "projects"
+        projects_dir.mkdir()
+
+        # Create a hidden directory with JSONL file
+        hidden_project = projects_dir / ".hidden_project"
+        hidden_project.mkdir()
+        jsonl_file = hidden_project / "test.jsonl"
+        jsonl_file.write_text('{"type": "user", "message": "test"}\n')
+
+        result = discover_projects_with_sessions(projects_dir)
+        assert len(result) == 0
+
+    def test_discover_skips_empty_projects(self, temp_project_dir):
+        """Test that projects without JSONL files are skipped."""
+        from claude_code_log.tui import discover_projects_with_sessions
+
+        projects_dir = temp_project_dir / "projects"
+        projects_dir.mkdir()
+
+        # Create a project without JSONL files
+        project1 = projects_dir / "empty_project"
+        project1.mkdir()
+        (project1 / "readme.txt").write_text("This is not a JSONL file")
+
+        result = discover_projects_with_sessions(projects_dir)
+        assert len(result) == 0
 
 
 @pytest.mark.tui
@@ -751,88 +565,57 @@ class TestIntegration:
     """Integration tests for TUI functionality."""
 
     @pytest.mark.asyncio
-    async def test_full_session_lifecycle(self, temp_project_dir):
-        """Test complete session browsing lifecycle."""
-        # Mock session data for integration test
-        mock_session_data = {
-            "session-123": SessionCacheData(
-                session_id="session-123",
-                first_timestamp="2025-01-01T10:00:00Z",
-                last_timestamp="2025-01-01T10:01:00Z",
-                message_count=2,
-                first_user_message="Hello, this is my first message",
-                total_input_tokens=10,
-                total_output_tokens=15,
-            ),
-            "session-456": SessionCacheData(
-                session_id="session-456",
-                first_timestamp="2025-01-02T14:30:00Z",
-                last_timestamp="2025-01-02T14:30:00Z",
-                message_count=1,
-                first_user_message="This is a different session",
-                total_input_tokens=0,
-                total_output_tokens=0,
-            ),
-        }
+    async def test_full_app_lifecycle(self, temp_project_dir):
+        """Test complete app lifecycle."""
+        mock_projects = [
+            {
+                "path": temp_project_dir,
+                "name": temp_project_dir.name,
+                "session_count": 1,
+                "message_count": 2,
+                "last_modified": "2025-01-01 10:00",
+            }
+        ]
 
-        mock_cache_manager = Mock(spec=CacheManager)
-        mock_cache_manager.get_cached_project_data.return_value = Mock(
-            sessions=mock_session_data, working_directories=[str(temp_project_dir)]
-        )
-        mock_cache_manager.get_modified_files.return_value = []  # No modified files
-
-        with patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager):
-            app = SessionBrowser(temp_project_dir)
+        with patch(
+            "claude_code_log.tui.discover_projects_with_sessions",
+            return_value=mock_projects,
+        ):
+            app = ClaudeCodeLogTUI(temp_project_dir)
 
             async with app.run_test() as pilot:
-                # Wait for initial load
-                await pilot.pause(1.0)
+                await pilot.pause(0.2)
 
-                # Manually trigger load_sessions to ensure data is loaded with mocked cache
-                app.sessions = mock_session_data
-                app.populate_sessions_table()
-                app.update_stats()
+                # Check projects loaded
+                assert len(app.projects) == 1
 
-                # Check that sessions are loaded
-                assert len(app.sessions) > 0
+                # Check UI elements
+                assert app.query_one("#title-label", Label)
+                assert app.query_one("#mode-select", Select)
+                assert app.query_one("#convert-btn", Button)
 
-                # Check that table is populated
-                table = cast(DataTable, app.query_one("#sessions-table"))
-                assert table.row_count > 0
+                # Toggle options
+                browser_switch = app.query_one("#opt-browser", Switch)
+                browser_switch.value = False
+                await pilot.pause(0.1)
 
-                # Check that stats are updated
-                stats = cast(Label, app.query_one("#stats"))
-                stats_text = str(stats.content)
-                assert "Sessions:" in stats_text
+                assert browser_switch.value is False
 
     @pytest.mark.asyncio
-    async def test_empty_project_handling(self):
-        """Test handling of project with no sessions."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            project_path = Path(temp_dir)
+    async def test_empty_projects_handling(self):
+        """Test handling when no projects found."""
+        with (
+            tempfile.TemporaryDirectory() as temp_dir,
+            patch(
+                "claude_code_log.tui.discover_projects_with_sessions",
+                return_value=[],
+            ),
+        ):
+            app = ClaudeCodeLogTUI(Path(temp_dir))
 
-            # Create empty JSONL file
-            jsonl_file = project_path / "empty.jsonl"
-            jsonl_file.touch()
+            async with app.run_test() as pilot:
+                await pilot.pause(0.2)
 
-            mock_cache_manager = Mock(spec=CacheManager)
-            mock_cache_manager.get_cached_project_data.return_value = Mock(
-                sessions={}, working_directories=[str(project_path)]
-            )
-            mock_cache_manager.get_modified_files.return_value = []
-
-            with patch("claude_code_log.tui.CacheManager", return_value=mock_cache_manager):
-                app = SessionBrowser(project_path)
-
-                async with app.run_test() as pilot:
-                    # Wait for initial load - longer on Windows due to Path.resolve() overhead
-                    pause_time = 1.0 if sys.platform == "win32" else 0.1
-                    await pilot.pause(pause_time)
-
-                    # Should handle empty project gracefully
-                    assert len(app.sessions) == 0
-
-                    # Stats should show zero sessions
-                    stats = cast(Label, app.query_one("#stats"))
-                    stats_text = str(stats.content)
-                    assert "Sessions: 0" in stats_text
+                # Should handle empty projects gracefully
+                assert len(app.projects) == 0
+                assert len(app.project_checkboxes) == 0
