@@ -2724,15 +2724,15 @@ class ClaudeCodeLogApp(toga.App):
     # ===== Team Report Functions =====
 
     def show_team_report_dialog(self, widget):
-        """Show team report dialog for admin users."""
+        """Show team report dialog with folder tree and checkboxes."""
         if not self.is_admin:
             self.log("❌ Team Report requires admin access")
             return
 
         # Create team report window
-        report_window = toga.Window(title="📊 Team Analytics Report", size=(500, 400))
+        self._team_window = toga.Window(title="📊 Team Analytics Report", size=(700, 600))
 
-        content = toga.Box(style=Pack(direction=COLUMN, margin=20))
+        content = toga.Box(style=Pack(direction=COLUMN, margin=15))
 
         # Title
         title = toga.Label(
@@ -2741,205 +2741,435 @@ class ClaudeCodeLogApp(toga.App):
         )
         content.add(title)
 
-        # Description
-        desc = toga.Label(
-            "Analyze team member statistics from shared Google Drive folder.",
-            style=Pack(margin_bottom=15),
-        )
-        content.add(desc)
-
-        # Team data source section
-        source_label = toga.Label(
-            "Team Data Source:",
+        # Step 1: Select root folder
+        step1_box = toga.Box(style=Pack(direction=COLUMN, margin_bottom=10))
+        step1_label = toga.Label(
+            "1️⃣ Chọn thư mục gốc (chứa các phòng ban):",
             style=Pack(font_weight="bold", margin_bottom=5),
         )
-        content.add(source_label)
+        step1_box.add(step1_label)
 
-        # Try to get drive URL from license
-        drive_url = get_license_drive_url()
-        folder_id = extract_folder_id_from_url(drive_url) if drive_url else None
-
-        source_box = toga.Box(style=Pack(direction=ROW, margin_bottom=10))
-
-        self._team_data_source = toga.Selection(
-            items=["Google Drive (License)", "Local Folder"],
-            style=Pack(flex=1, margin_right=10),
-        )
-        source_box.add(self._team_data_source)
-
-        content.add(source_box)
-
-        # Local folder path input (for local mode)
-        local_path_box = toga.Box(style=Pack(direction=ROW, margin_bottom=10))
-        local_path_label = toga.Label("Local Path:", style=Pack(width=80))
-        local_path_box.add(local_path_label)
-
-        self._team_local_path = toga.TextInput(
-            placeholder="Path to local team data folder",
+        folder_row = toga.Box(style=Pack(direction=ROW, margin_bottom=10))
+        self._team_root_path = toga.TextInput(
+            placeholder="Chọn thư mục chứa dữ liệu team...",
             style=Pack(flex=1, margin_right=5),
         )
-        local_path_box.add(self._team_local_path)
+        folder_row.add(self._team_root_path)
 
         browse_btn = toga.Button(
             "Browse",
-            on_press=lambda w: self._browse_team_folder(report_window),
-            style=Pack(width=70),
+            on_press=self._browse_team_root,
+            style=Pack(width=80),
         )
-        local_path_box.add(browse_btn)
+        folder_row.add(browse_btn)
 
-        content.add(local_path_box)
-
-        # Drive folder info (if license has drive URL)
-        if folder_id:
-            drive_info = toga.Label(
-                f"📁 License Drive: {drive_url[:50]}..." if len(drive_url) > 50 else f"📁 License Drive: {drive_url}",
-                style=Pack(margin_bottom=10, font_size=10),
-            )
-            content.add(drive_info)
-
-        # Output section
-        output_label = toga.Label(
-            "Output Directory:",
-            style=Pack(font_weight="bold", margin_bottom=5, margin_top=10),
+        load_btn = toga.Button(
+            "Load",
+            on_press=self._load_team_folders,
+            style=Pack(width=80, margin_left=5),
         )
-        content.add(output_label)
+        folder_row.add(load_btn)
 
-        output_box = toga.Box(style=Pack(direction=ROW, margin_bottom=15))
+        step1_box.add(folder_row)
+        content.add(step1_box)
 
+        # Step 2: Department list (phòng ban)
+        step2_box = toga.Box(style=Pack(direction=COLUMN, margin_bottom=10))
+        step2_label = toga.Label(
+            "2️⃣ Chọn phòng ban:",
+            style=Pack(font_weight="bold", margin_bottom=5),
+        )
+        step2_box.add(step2_label)
+
+        self._dept_selection = toga.Selection(
+            items=["-- Chọn phòng ban --"],
+            on_change=self._on_dept_selected,
+            style=Pack(flex=1, margin_bottom=5),
+        )
+        step2_box.add(self._dept_selection)
+        content.add(step2_box)
+
+        # Step 3: Member list with checkboxes (using Table with selection)
+        step3_box = toga.Box(style=Pack(direction=COLUMN, flex=1))
+        step3_header = toga.Box(style=Pack(direction=ROW, margin_bottom=5))
+        step3_label = toga.Label(
+            "3️⃣ Chọn thành viên để phân tích:",
+            style=Pack(font_weight="bold", flex=1),
+        )
+        step3_header.add(step3_label)
+
+        select_all_btn = toga.Button(
+            "Chọn tất cả",
+            on_press=self._select_all_members,
+            style=Pack(width=100, margin_right=5),
+        )
+        step3_header.add(select_all_btn)
+
+        deselect_all_btn = toga.Button(
+            "Bỏ chọn tất cả",
+            on_press=self._deselect_all_members,
+            style=Pack(width=110),
+        )
+        step3_header.add(deselect_all_btn)
+
+        step3_box.add(step3_header)
+
+        # Member table with multi-selection
+        self._member_table = toga.Table(
+            headings=["✓", "Thành viên", "Số project", "Số file"],
+            data=[],
+            multiple_select=True,
+            style=Pack(flex=1),
+        )
+        step3_box.add(self._member_table)
+        content.add(step3_box)
+
+        # Step 4: Output options
+        step4_box = toga.Box(style=Pack(direction=COLUMN, margin_top=10))
+        step4_label = toga.Label(
+            "4️⃣ Thư mục xuất báo cáo:",
+            style=Pack(font_weight="bold", margin_bottom=5),
+        )
+        step4_box.add(step4_label)
+
+        output_row = toga.Box(style=Pack(direction=ROW, margin_bottom=10))
         self._team_output_path = toga.TextInput(
-            placeholder="Leave empty for team data folder",
+            placeholder="Để trống sẽ lưu vào thư mục gốc",
             style=Pack(flex=1, margin_right=5),
         )
-        output_box.add(self._team_output_path)
+        output_row.add(self._team_output_path)
 
         output_browse_btn = toga.Button(
             "Browse",
-            on_press=lambda w: self._browse_team_output(report_window),
-            style=Pack(width=70),
+            on_press=self._browse_team_output,
+            style=Pack(width=80),
         )
-        output_box.add(output_browse_btn)
+        output_row.add(output_browse_btn)
 
-        content.add(output_box)
+        step4_box.add(output_row)
+        content.add(step4_box)
 
-        # Status label
+        # Status and buttons
+        status_box = toga.Box(style=Pack(direction=COLUMN, margin_top=10))
+
         self._team_report_status = toga.Label(
-            "Ready to generate report",
+            "Sẵn sàng - Chọn thư mục và thành viên để phân tích",
             style=Pack(margin_bottom=10),
         )
-        content.add(self._team_report_status)
+        status_box.add(self._team_report_status)
 
-        # Action buttons
-        button_box = toga.Box(style=Pack(direction=ROW, margin_top=10))
+        button_box = toga.Box(style=Pack(direction=ROW))
 
         self._generate_report_btn = toga.Button(
-            "Generate Report",
-            on_press=lambda w: self._generate_team_report(report_window),
+            "📊 Phân tích & Tạo báo cáo",
+            on_press=self._generate_team_report,
             style=Pack(flex=1, margin_right=10),
         )
         button_box.add(self._generate_report_btn)
 
         cancel_btn = toga.Button(
-            "Cancel",
-            on_press=lambda w: report_window.close(),
+            "Đóng",
+            on_press=lambda w: self._team_window.close(),
             style=Pack(width=100),
         )
         button_box.add(cancel_btn)
 
-        content.add(button_box)
+        status_box.add(button_box)
+        content.add(status_box)
 
-        report_window.content = content
-        report_window.show()
+        # Initialize data storage
+        self._team_departments = []  # List of department folders
+        self._team_members = []  # List of member data for current dept
+        self._selected_members = set()  # Selected member paths
 
-    async def _browse_team_folder(self, window):
-        """Browse for team data folder."""
+        self._team_window.content = content
+        self._team_window.show()
+
+    def _browse_team_root(self, widget):
+        """Browse for team root folder."""
+        asyncio.create_task(self._browse_team_root_async())
+
+    async def _browse_team_root_async(self):
+        """Browse for team root folder asynchronously."""
         try:
-            folder = await window.select_folder_dialog("Select Team Data Folder")
+            folder = await self._team_window.select_folder_dialog(
+                "Chọn thư mục gốc chứa dữ liệu team"
+            )
             if folder:
-                self._team_local_path.value = str(folder)
+                self._team_root_path.value = str(folder)
         except Exception as e:
             self.log(f"Error selecting folder: {e}")
 
-    async def _browse_team_output(self, window):
-        """Browse for output folder."""
+    def _load_team_folders(self, widget):
+        """Load department folders from root path."""
+        root_path_str = self._team_root_path.value.strip()
+        if not root_path_str:
+            self._team_report_status.text = "❌ Vui lòng chọn thư mục gốc"
+            return
+
+        root_path = Path(root_path_str)
+        if not root_path.exists():
+            self._team_report_status.text = f"❌ Thư mục không tồn tại: {root_path}"
+            return
+
+        # Scan for department folders (direct subfolders)
+        self._team_departments = []
         try:
-            folder = await window.select_folder_dialog("Select Output Folder")
+            for item in sorted(root_path.iterdir()):
+                if item.is_dir() and not item.name.startswith('.'):
+                    # Count subfolders/files
+                    member_count = sum(1 for x in item.iterdir() if x.is_dir() and not x.name.startswith('.'))
+                    self._team_departments.append({
+                        "name": item.name,
+                        "path": item,
+                        "member_count": member_count,
+                    })
+        except Exception as e:
+            self._team_report_status.text = f"❌ Lỗi đọc thư mục: {e}"
+            return
+
+        if not self._team_departments:
+            self._team_report_status.text = "❌ Không tìm thấy phòng ban nào"
+            return
+
+        # Update department selection
+        dept_items = ["-- Chọn phòng ban --"] + [
+            f"{d['name']} ({d['member_count']} thành viên)"
+            for d in self._team_departments
+        ]
+        self._dept_selection.items = dept_items
+
+        self._team_report_status.text = f"✅ Tìm thấy {len(self._team_departments)} phòng ban"
+        self.log(f"📁 Loaded {len(self._team_departments)} departments from {root_path}")
+
+    def _on_dept_selected(self, widget):
+        """Handle department selection change."""
+        selected_idx = self._dept_selection.items.index(self._dept_selection.value) if self._dept_selection.value else 0
+
+        if selected_idx == 0:  # "-- Chọn phòng ban --"
+            self._member_table.data = []
+            self._team_members = []
+            return
+
+        dept = self._team_departments[selected_idx - 1]
+        self._load_members_for_dept(dept)
+
+    def _load_members_for_dept(self, dept):
+        """Load members for selected department."""
+        self._team_members = []
+        dept_path = dept["path"]
+
+        try:
+            for item in sorted(dept_path.iterdir()):
+                if item.is_dir() and not item.name.startswith('.'):
+                    # Count projects and files
+                    project_count = 0
+                    file_count = 0
+
+                    # Look for projects subfolder or direct JSONL files
+                    projects_dir = item / "projects"
+                    if projects_dir.exists():
+                        for proj in projects_dir.iterdir():
+                            if proj.is_dir():
+                                project_count += 1
+                                file_count += sum(1 for f in proj.glob("*.jsonl"))
+                    else:
+                        # Check for direct JSONL files
+                        file_count = sum(1 for f in item.rglob("*.jsonl"))
+
+                    self._team_members.append({
+                        "name": item.name,
+                        "path": item,
+                        "project_count": project_count,
+                        "file_count": file_count,
+                        "selected": True,  # Selected by default
+                    })
+        except Exception as e:
+            self._team_report_status.text = f"❌ Lỗi đọc thành viên: {e}"
+            return
+
+        # Update table
+        table_data = []
+        for m in self._team_members:
+            table_data.append((
+                "✓" if m["selected"] else "",
+                m["name"],
+                str(m["project_count"]),
+                str(m["file_count"]),
+            ))
+
+        self._member_table.data = table_data
+        self._team_report_status.text = f"📋 {len(self._team_members)} thành viên trong phòng {dept['name']}"
+
+    def _select_all_members(self, widget):
+        """Select all members."""
+        for m in self._team_members:
+            m["selected"] = True
+        self._refresh_member_table()
+
+    def _deselect_all_members(self, widget):
+        """Deselect all members."""
+        for m in self._team_members:
+            m["selected"] = False
+        self._refresh_member_table()
+
+    def _refresh_member_table(self):
+        """Refresh member table with current selection state."""
+        table_data = []
+        for m in self._team_members:
+            table_data.append((
+                "✓" if m["selected"] else "",
+                m["name"],
+                str(m["project_count"]),
+                str(m["file_count"]),
+            ))
+        self._member_table.data = table_data
+
+    def _browse_team_output(self, widget):
+        """Browse for output folder."""
+        asyncio.create_task(self._browse_team_output_async())
+
+    async def _browse_team_output_async(self):
+        """Browse for output folder asynchronously."""
+        try:
+            folder = await self._team_window.select_folder_dialog(
+                "Chọn thư mục xuất báo cáo"
+            )
             if folder:
                 self._team_output_path.value = str(folder)
         except Exception as e:
             self.log(f"Error selecting folder: {e}")
 
-    def _generate_team_report(self, window):
-        """Generate team analytics report."""
-        self._team_report_status.text = "Generating report..."
+    def _generate_team_report(self, widget):
+        """Generate team analytics report for selected members."""
+        # Get selected members from table selection
+        selected_rows = self._member_table.selection
+        if selected_rows:
+            # Update selection based on table selection
+            selected_names = set()
+            for row in selected_rows:
+                if len(row) >= 2:
+                    selected_names.add(row[1])  # Member name is in column 1
+
+            for m in self._team_members:
+                m["selected"] = m["name"] in selected_names
+        else:
+            # Use all members marked as selected
+            pass
+
+        selected_members = [m for m in self._team_members if m["selected"]]
+
+        if not selected_members:
+            self._team_report_status.text = "❌ Vui lòng chọn ít nhất 1 thành viên"
+            return
+
+        self._team_report_status.text = f"🔄 Đang phân tích {len(selected_members)} thành viên..."
         self._generate_report_btn.enabled = False
 
-        # Run in background
-        asyncio.create_task(self._generate_team_report_async(window))
+        asyncio.create_task(self._generate_team_report_async(selected_members))
 
-    async def _generate_team_report_async(self, window):
+    async def _generate_team_report_async(self, selected_members):
         """Generate team report asynchronously."""
         try:
             from .claude_code_log.team_analytics import (
                 TeamAnalyticsManager,
                 generate_dashboard_html,
+                MemberStats,
+                TeamAnalytics,
             )
 
-            source_mode = self._team_data_source.value
-            local_path = self._team_local_path.value.strip()
-            output_path = self._team_output_path.value.strip()
+            root_path_str = self._team_root_path.value.strip()
+            output_path_str = self._team_output_path.value.strip()
 
-            # Determine data path
-            if source_mode == "Local Folder":
-                if not local_path:
-                    self._team_report_status.text = "❌ Please enter local folder path"
-                    self._generate_report_btn.enabled = True
-                    return
-                data_path = Path(local_path)
-            else:
-                # Google Drive mode - need to download or use local sync
-                drive_url = get_license_drive_url()
-                if not drive_url:
-                    self._team_report_status.text = "❌ No Drive URL in license"
-                    self._generate_report_btn.enabled = True
-                    return
-
-                # For now, require local path even for Drive mode
-                # (user should sync their Drive folder locally)
-                if not local_path:
-                    self._team_report_status.text = "❌ Please enter path to synced Drive folder"
-                    self._generate_report_btn.enabled = True
-                    return
-                data_path = Path(local_path)
-
-            if not data_path.exists():
-                self._team_report_status.text = f"❌ Path not found: {data_path}"
-                self._generate_report_btn.enabled = True
-                return
-
-            self._team_report_status.text = "Analyzing team data..."
-            self.log(f"📊 Analyzing team data from: {data_path}")
-
-            # Create manager and analyze
-            manager = TeamAnalyticsManager(data_path, role="super_admin")
-
-            members = manager.discover_members()
-            if not members:
-                self._team_report_status.text = "❌ No team members found"
-                self.log("❌ No team members found in the data folder")
-                self._generate_report_btn.enabled = True
-                return
-
-            self.log(f"Found {len(members)} team members: {', '.join(members[:5])}{'...' if len(members) > 5 else ''}")
-
-            analytics = manager.analyze_team()
+            root_path = Path(root_path_str)
 
             # Determine output directory
-            if output_path:
-                output_dir = Path(output_path)
+            if output_path_str:
+                output_dir = Path(output_path_str)
             else:
-                output_dir = data_path
+                output_dir = root_path
 
             output_dir.mkdir(parents=True, exist_ok=True)
+
+            self.log(f"📊 Analyzing {len(selected_members)} members...")
+
+            # Create custom analytics by analyzing only selected members
+            manager = TeamAnalyticsManager(root_path, role="super_admin")
+
+            # Analyze each selected member
+            all_members = {}
+            total_projects = 0
+            total_sessions = 0
+            total_messages = 0
+            total_input_tokens = 0
+            total_output_tokens = 0
+            earliest_ts = None
+            latest_ts = None
+
+            for idx, member_info in enumerate(selected_members):
+                member_path = member_info["path"]
+                member_name = member_info["name"]
+
+                self._team_report_status.text = f"🔄 Phân tích {member_name}... ({idx+1}/{len(selected_members)})"
+
+                # Analyze this member
+                stats = manager.analyze_member(member_name)
+                if stats:
+                    all_members[member_name] = stats
+                    total_projects += stats.project_count
+                    total_sessions += stats.total_sessions
+                    total_messages += stats.total_messages
+                    total_input_tokens += stats.total_input_tokens
+                    total_output_tokens += stats.total_output_tokens
+
+                    if stats.earliest_activity:
+                        if earliest_ts is None or stats.earliest_activity < earliest_ts:
+                            earliest_ts = stats.earliest_activity
+                    if stats.latest_activity:
+                        if latest_ts is None or stats.latest_activity > latest_ts:
+                            latest_ts = stats.latest_activity
+
+            if not all_members:
+                self._team_report_status.text = "❌ Không có dữ liệu để phân tích"
+                self._generate_report_btn.enabled = True
+                return
+
+            # Create analytics object
+            from datetime import datetime as dt
+            analytics = TeamAnalytics(
+                generated_at=dt.now().isoformat(),
+                data_source=str(root_path),
+                total_members=len(all_members),
+                total_projects=total_projects,
+                total_sessions=total_sessions,
+                total_messages=total_messages,
+                total_input_tokens=total_input_tokens,
+                total_output_tokens=total_output_tokens,
+                members=all_members,
+                earliest_activity=earliest_ts,
+                latest_activity=latest_ts,
+            )
+
+            # Calculate rankings
+            sorted_by_messages = sorted(
+                all_members.items(),
+                key=lambda x: x[1].total_messages,
+                reverse=True
+            )
+            analytics.productivity_ranking = [
+                (member_id, rank + 1)
+                for rank, (member_id, _) in enumerate(sorted_by_messages)
+            ]
+
+            sorted_by_tokens = sorted(
+                all_members.items(),
+                key=lambda x: x[1].total_input_tokens + x[1].total_output_tokens,
+                reverse=True
+            )
+            analytics.token_usage_ranking = [
+                (member_id, rank + 1)
+                for rank, (member_id, _) in enumerate(sorted_by_tokens)
+            ]
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -2961,10 +3191,10 @@ class ClaudeCodeLogApp(toga.App):
             # Open in browser
             webbrowser.open(f"file://{html_path}")
 
-            self._team_report_status.text = f"✅ Report generated! {analytics.total_members} members"
-            self.log(f"✅ Team analytics complete! {analytics.total_members} members analyzed.")
+            self._team_report_status.text = f"✅ Hoàn thành! Đã phân tích {len(all_members)} thành viên"
+            self.log(f"✅ Team analytics complete! {len(all_members)} members analyzed.")
 
-            window.close()
+            self._team_window.close()
 
         except Exception as e:
             self._team_report_status.text = f"❌ Error: {e}"

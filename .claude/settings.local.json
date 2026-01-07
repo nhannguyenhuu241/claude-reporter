@@ -19,7 +19,8 @@
       "Bash(timeout 3 uv run:*)",
       "Bash(timeout 2 uv run:*)",
       "Bash(cat:*)",
-      "Bash(timeout 5 uv run python:*)"
+      "Bash(timeout 5 uv run python:*)",
+      "Bash(briefcase dev)"
     ]
   }
 }
