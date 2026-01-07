@@ -887,6 +887,15 @@ class ClaudeCodeLogApp(toga.App):
         )
         button_box.add(self.upload_btn)
 
+        # Team Report button (only for admin)
+        if self.is_admin:
+            self.team_report_btn = toga.Button(
+                "📊 Team Report",
+                on_press=self.show_team_report_dialog,
+                style=Pack(flex=1, margin=5),
+            )
+            button_box.add(self.team_report_btn)
+
         clear_btn = toga.Button(
             "Clear Log",
             on_press=self.clear_log,
@@ -2658,6 +2667,257 @@ class ClaudeCodeLogApp(toga.App):
             self.log(f"❌ Upload error: {e}")
 
         self._upload_start_btn.enabled = True
+
+    # ===== Team Report Functions =====
+
+    def show_team_report_dialog(self, widget):
+        """Show team report dialog for admin users."""
+        if not self.is_admin:
+            self.log("❌ Team Report requires admin access")
+            return
+
+        # Create team report window
+        report_window = toga.Window(title="📊 Team Analytics Report", size=(500, 400))
+
+        content = toga.Box(style=Pack(direction=COLUMN, margin=20))
+
+        # Title
+        title = toga.Label(
+            "Team Analytics Report",
+            style=Pack(font_size=16, font_weight="bold", margin_bottom=10),
+        )
+        content.add(title)
+
+        # Description
+        desc = toga.Label(
+            "Analyze team member statistics from shared Google Drive folder.",
+            style=Pack(margin_bottom=15),
+        )
+        content.add(desc)
+
+        # Team data source section
+        source_label = toga.Label(
+            "Team Data Source:",
+            style=Pack(font_weight="bold", margin_bottom=5),
+        )
+        content.add(source_label)
+
+        # Try to get drive URL from license
+        drive_url = get_license_drive_url()
+        folder_id = extract_folder_id_from_url(drive_url) if drive_url else None
+
+        source_box = toga.Box(style=Pack(direction=ROW, margin_bottom=10))
+
+        self._team_data_source = toga.Selection(
+            items=["Google Drive (License)", "Local Folder"],
+            style=Pack(flex=1, margin_right=10),
+        )
+        source_box.add(self._team_data_source)
+
+        content.add(source_box)
+
+        # Local folder path input (for local mode)
+        local_path_box = toga.Box(style=Pack(direction=ROW, margin_bottom=10))
+        local_path_label = toga.Label("Local Path:", style=Pack(width=80))
+        local_path_box.add(local_path_label)
+
+        self._team_local_path = toga.TextInput(
+            placeholder="Path to local team data folder",
+            style=Pack(flex=1, margin_right=5),
+        )
+        local_path_box.add(self._team_local_path)
+
+        browse_btn = toga.Button(
+            "Browse",
+            on_press=lambda w: self._browse_team_folder(report_window),
+            style=Pack(width=70),
+        )
+        local_path_box.add(browse_btn)
+
+        content.add(local_path_box)
+
+        # Drive folder info (if license has drive URL)
+        if folder_id:
+            drive_info = toga.Label(
+                f"📁 License Drive: {drive_url[:50]}..." if len(drive_url) > 50 else f"📁 License Drive: {drive_url}",
+                style=Pack(margin_bottom=10, font_size=10),
+            )
+            content.add(drive_info)
+
+        # Output section
+        output_label = toga.Label(
+            "Output Directory:",
+            style=Pack(font_weight="bold", margin_bottom=5, margin_top=10),
+        )
+        content.add(output_label)
+
+        output_box = toga.Box(style=Pack(direction=ROW, margin_bottom=15))
+
+        self._team_output_path = toga.TextInput(
+            placeholder="Leave empty for team data folder",
+            style=Pack(flex=1, margin_right=5),
+        )
+        output_box.add(self._team_output_path)
+
+        output_browse_btn = toga.Button(
+            "Browse",
+            on_press=lambda w: self._browse_team_output(report_window),
+            style=Pack(width=70),
+        )
+        output_box.add(output_browse_btn)
+
+        content.add(output_box)
+
+        # Status label
+        self._team_report_status = toga.Label(
+            "Ready to generate report",
+            style=Pack(margin_bottom=10),
+        )
+        content.add(self._team_report_status)
+
+        # Action buttons
+        button_box = toga.Box(style=Pack(direction=ROW, margin_top=10))
+
+        self._generate_report_btn = toga.Button(
+            "Generate Report",
+            on_press=lambda w: self._generate_team_report(report_window),
+            style=Pack(flex=1, margin_right=10),
+        )
+        button_box.add(self._generate_report_btn)
+
+        cancel_btn = toga.Button(
+            "Cancel",
+            on_press=lambda w: report_window.close(),
+            style=Pack(width=100),
+        )
+        button_box.add(cancel_btn)
+
+        content.add(button_box)
+
+        report_window.content = content
+        report_window.show()
+
+    async def _browse_team_folder(self, window):
+        """Browse for team data folder."""
+        try:
+            folder = await window.select_folder_dialog("Select Team Data Folder")
+            if folder:
+                self._team_local_path.value = str(folder)
+        except Exception as e:
+            self.log(f"Error selecting folder: {e}")
+
+    async def _browse_team_output(self, window):
+        """Browse for output folder."""
+        try:
+            folder = await window.select_folder_dialog("Select Output Folder")
+            if folder:
+                self._team_output_path.value = str(folder)
+        except Exception as e:
+            self.log(f"Error selecting folder: {e}")
+
+    def _generate_team_report(self, window):
+        """Generate team analytics report."""
+        self._team_report_status.text = "Generating report..."
+        self._generate_report_btn.enabled = False
+
+        # Run in background
+        asyncio.create_task(self._generate_team_report_async(window))
+
+    async def _generate_team_report_async(self, window):
+        """Generate team report asynchronously."""
+        try:
+            from .claude_code_log.team_analytics import (
+                TeamAnalyticsManager,
+                generate_dashboard_html,
+            )
+
+            source_mode = self._team_data_source.value
+            local_path = self._team_local_path.value.strip()
+            output_path = self._team_output_path.value.strip()
+
+            # Determine data path
+            if source_mode == "Local Folder":
+                if not local_path:
+                    self._team_report_status.text = "❌ Please enter local folder path"
+                    self._generate_report_btn.enabled = True
+                    return
+                data_path = Path(local_path)
+            else:
+                # Google Drive mode - need to download or use local sync
+                drive_url = get_license_drive_url()
+                if not drive_url:
+                    self._team_report_status.text = "❌ No Drive URL in license"
+                    self._generate_report_btn.enabled = True
+                    return
+
+                # For now, require local path even for Drive mode
+                # (user should sync their Drive folder locally)
+                if not local_path:
+                    self._team_report_status.text = "❌ Please enter path to synced Drive folder"
+                    self._generate_report_btn.enabled = True
+                    return
+                data_path = Path(local_path)
+
+            if not data_path.exists():
+                self._team_report_status.text = f"❌ Path not found: {data_path}"
+                self._generate_report_btn.enabled = True
+                return
+
+            self._team_report_status.text = "Analyzing team data..."
+            self.log(f"📊 Analyzing team data from: {data_path}")
+
+            # Create manager and analyze
+            manager = TeamAnalyticsManager(data_path, role="super_admin")
+
+            members = manager.discover_members()
+            if not members:
+                self._team_report_status.text = "❌ No team members found"
+                self.log("❌ No team members found in the data folder")
+                self._generate_report_btn.enabled = True
+                return
+
+            self.log(f"Found {len(members)} team members: {', '.join(members[:5])}{'...' if len(members) > 5 else ''}")
+
+            analytics = manager.analyze_team()
+
+            # Determine output directory
+            if output_path:
+                output_dir = Path(output_path)
+            else:
+                output_dir = data_path
+
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # Export CSV
+            csv_path = output_dir / f"team_analytics_{timestamp}.csv"
+            manager.export_to_csv(analytics, csv_path)
+            self.log(f"Exported CSV: {csv_path.name}")
+
+            # Export JSON
+            json_path = output_dir / f"team_analytics_{timestamp}.json"
+            manager.export_to_json(analytics, json_path)
+            self.log(f"Exported JSON: {json_path.name}")
+
+            # Generate HTML dashboard
+            html_path = output_dir / f"team_dashboard_{timestamp}.html"
+            generate_dashboard_html(analytics, html_path, csv_path, json_path)
+            self.log(f"Generated dashboard: {html_path.name}")
+
+            # Open in browser
+            webbrowser.open(f"file://{html_path}")
+
+            self._team_report_status.text = f"✅ Report generated! {analytics.total_members} members"
+            self.log(f"✅ Team analytics complete! {analytics.total_members} members analyzed.")
+
+            window.close()
+
+        except Exception as e:
+            self._team_report_status.text = f"❌ Error: {e}"
+            self.log(f"❌ Team report error: {e}")
+
+        self._generate_report_btn.enabled = True
 
 
 def main():
