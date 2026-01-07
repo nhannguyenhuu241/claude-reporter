@@ -27,6 +27,7 @@ from textual.reactive import reactive
 from .cache import CacheManager, SessionCacheData, get_library_version
 from .converter import convert_jsonl_to_html, process_projects_hierarchy, process_selected_projects, ensure_fresh_cache
 from .renderer import get_project_display_name
+from .team_analytics import TeamAnalyticsManager, generate_dashboard_html
 
 
 def get_default_projects_dir() -> Path:
@@ -203,6 +204,26 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
 
     #upload-btn {
         width: 1fr;
+        margin-right: 1;
+    }
+
+    #team-analytics-btn {
+        width: 1fr;
+    }
+
+    /* Team Analytics Section */
+    #team-section {
+        height: auto;
+        layout: horizontal;
+        margin-bottom: 1;
+    }
+
+    .team-label {
+        width: 12;
+    }
+
+    .team-input {
+        width: 1fr;
     }
 
     /* Status section */
@@ -278,10 +299,16 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
                 yield Input(value=today, placeholder="dd/mm/yyyy", id="to-date", classes="date-input")
                 yield Button("×", id="clear-to", classes="date-clear")
 
+            # Team Analytics section (for admin)
+            with Horizontal(id="team-section"):
+                yield Label("Team Data:", classes="team-label")
+                yield Input(placeholder="Path to shared team data folder (Google Drive)", id="team-data-path", classes="team-input")
+
             # Action buttons section
             with Horizontal(id="action-section"):
                 yield Button("Convert", id="convert-btn", variant="primary")
-                yield Button("Upload to Google", id="upload-btn", variant="success")
+                yield Button("Upload", id="upload-btn", variant="success")
+                yield Button("Team Report", id="team-analytics-btn", variant="warning")
 
             # Status section
             with Vertical(id="status-section"):
@@ -360,6 +387,8 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             self.query_one("#to-date", Input).value = ""
         elif button_id == "upload-btn":
             self._do_upload_to_google()
+        elif button_id == "team-analytics-btn":
+            self._do_team_analytics()
 
     def action_refresh(self) -> None:
         """Refresh projects list."""
@@ -576,6 +605,95 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             self.add_log(f"Done! Drag {zip_filename} to Google Drive")
             self.notify(f"Zip created! Drag to Google Drive to upload.", timeout=8)
 
+        except Exception as e:
+            self.add_log(f"Error: {e}")
+            self.notify(f"Error: {e}", severity="error")
+
+    def _do_team_analytics(self) -> None:
+        """Generate team analytics report."""
+        self.run_worker(self._team_analytics_async(), exclusive=True)
+
+    async def _team_analytics_async(self) -> None:
+        """Generate team analytics report in background."""
+        try:
+            progress = self.query_one("#progress-bar", ProgressBar)
+            progress.update(progress=0)
+
+            # Get team data path
+            team_data_path_str = self.query_one("#team-data-path", Input).value.strip()
+            if not team_data_path_str:
+                self.add_log("Error: Please enter path to shared team data folder")
+                self.notify("Enter team data folder path!", severity="error")
+                return
+
+            team_data_path = Path(team_data_path_str)
+            if not team_data_path.exists():
+                self.add_log(f"Error: Path does not exist: {team_data_path}")
+                self.notify("Team data folder not found!", severity="error")
+                return
+
+            self.add_log(f"Analyzing team data from: {team_data_path}")
+            progress.update(progress=10)
+
+            # Create team analytics manager (assuming admin role)
+            manager = TeamAnalyticsManager(team_data_path, role="super_admin")
+
+            # Discover members
+            members = manager.discover_members()
+            if not members:
+                self.add_log("Error: No team members found in the data folder")
+                self.notify("No team members found!", severity="error")
+                return
+
+            self.add_log(f"Found {len(members)} team members: {', '.join(members[:5])}{'...' if len(members) > 5 else ''}")
+            progress.update(progress=30)
+
+            # Analyze team
+            self.add_log("Analyzing team data...")
+            analytics = manager.analyze_team()
+            progress.update(progress=60)
+
+            # Determine output directory
+            output_path_str = self.query_one("#output-path", Input).value.strip()
+            if output_path_str:
+                output_dir = Path(output_path_str)
+            else:
+                output_dir = team_data_path
+
+            # Ensure output directory exists
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Generate reports
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # Export CSV
+            csv_path = output_dir / f"team_analytics_{timestamp}.csv"
+            manager.export_to_csv(analytics, csv_path)
+            self.add_log(f"Exported CSV: {csv_path.name}")
+            progress.update(progress=70)
+
+            # Export JSON
+            json_path = output_dir / f"team_analytics_{timestamp}.json"
+            manager.export_to_json(analytics, json_path)
+            self.add_log(f"Exported JSON: {json_path.name}")
+            progress.update(progress=80)
+
+            # Generate HTML dashboard
+            html_path = output_dir / f"team_dashboard_{timestamp}.html"
+            generate_dashboard_html(analytics, html_path, csv_path, json_path)
+            self.add_log(f"Generated dashboard: {html_path.name}")
+            progress.update(progress=95)
+
+            # Open in browser
+            webbrowser.open(f"file://{html_path}")
+
+            progress.update(progress=100)
+            self.add_log(f"Team analytics complete! {analytics.total_members} members analyzed.")
+            self.notify(f"Team report generated! {analytics.total_members} members", timeout=8)
+
+        except PermissionError as e:
+            self.add_log(f"Error: {e}")
+            self.notify("Unauthorized: Admin role required", severity="error")
         except Exception as e:
             self.add_log(f"Error: {e}")
             self.notify(f"Error: {e}", severity="error")

@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team Analytics Dashboard - Claude Code Log</title>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-card: #0f3460;
+            --text-primary: #eaeaea;
+            --text-secondary: #a0a0a0;
+            --accent-blue: #4a9eff;
+            --accent-green: #4ade80;
+            --accent-orange: #fb923c;
+            --accent-purple: #a78bfa;
+            --accent-pink: #f472b6;
+            --border-color: #2d3748;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        header h1 {
+            font-size: 1.8rem;
+            font-weight: 600;
+        }
+
+        .header-meta {
+            text-align: right;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        /* Overview Cards */
+        .overview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .overview-card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: center;
+        }
+
+        .overview-card .value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--accent-blue);
+        }
+
+        .overview-card .label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        .overview-card.green .value { color: var(--accent-green); }
+        .overview-card.orange .value { color: var(--accent-orange); }
+        .overview-card.purple .value { color: var(--accent-purple); }
+        .overview-card.pink .value { color: var(--accent-pink); }
+
+        /* Section */
+        .section {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .section h2 {
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .section h2::before {
+            content: '';
+            width: 4px;
+            height: 24px;
+            background: var(--accent-blue);
+            border-radius: 2px;
+        }
+
+        /* Members Table */
+        .table-container {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background: var(--bg-card);
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        tr:hover {
+            background: rgba(74, 158, 255, 0.05);
+        }
+
+        .rank {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        .rank-1 { background: #ffd700; color: #000; }
+        .rank-2 { background: #c0c0c0; color: #000; }
+        .rank-3 { background: #cd7f32; color: #fff; }
+        .rank-other { background: var(--bg-card); color: var(--text-secondary); }
+
+        .member-name {
+            font-weight: 500;
+        }
+
+        .metric {
+            font-family: 'SF Mono', Consolas, monospace;
+            font-size: 0.95rem;
+        }
+
+        .metric-secondary {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        /* Token Bar */
+        .token-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .token-bar-fill {
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+        }
+
+        /* Rankings */
+        .rankings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .ranking-list {
+            list-style: none;
+        }
+
+        .ranking-item {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            background: var(--bg-card);
+        }
+
+        .ranking-item .details {
+            flex: 1;
+        }
+
+        .ranking-item .name {
+            font-weight: 500;
+        }
+
+        .ranking-item .stat {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        /* Timeline Chart Placeholder */
+        .timeline-chart {
+            height: 200px;
+            background: var(--bg-card);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-secondary);
+        }
+
+        /* Export Buttons */
+        .export-buttons {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--accent-blue);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #3d8ae8;
+        }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-secondary);
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+
+            .overview-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .overview-card .value {
+                font-size: 1.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Team Analytics Dashboard</h1>
+            <div class="header-meta">
+                <div>Generated: {{ generated_at }}</div>
+                <div>Data Source: {{ data_source }}</div>
+            </div>
+        </header>
+
+        <!-- Overview Cards -->
+        <div class="overview-grid">
+            <div class="overview-card">
+                <div class="value">{{ total_members }}</div>
+                <div class="label">Team Members</div>
+            </div>
+            <div class="overview-card green">
+                <div class="value">{{ total_projects }}</div>
+                <div class="label">Total Projects</div>
+            </div>
+            <div class="overview-card orange">
+                <div class="value">{{ total_sessions }}</div>
+                <div class="label">Total Sessions</div>
+            </div>
+            <div class="overview-card purple">
+                <div class="value">{{ total_messages }}</div>
+                <div class="label">Total Messages</div>
+            </div>
+            <div class="overview-card pink">
+                <div class="value">{{ format_tokens(total_input_tokens + total_output_tokens) }}</div>
+                <div class="label">Total Tokens</div>
+            </div>
+            <div class="overview-card">
+                <div class="value">${{ estimated_cost }}</div>
+                <div class="label">Est. Cost (USD)</div>
+            </div>
+        </div>
+
+        <!-- Activity Timeline -->
+        {% if earliest_activity and latest_activity %}
+        <div class="section">
+            <h2>Activity Period</h2>
+            <p style="color: var(--text-secondary);">
+                From <strong>{{ earliest_activity }}</strong> to <strong>{{ latest_activity }}</strong>
+            </p>
+        </div>
+        {% endif %}
+
+        <!-- Member Statistics Table -->
+        <div class="section">
+            <h2>Member Statistics</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Member</th>
+                            <th>Projects</th>
+                            <th>Sessions</th>
+                            <th>Messages</th>
+                            <th>Input Tokens</th>
+                            <th>Output Tokens</th>
+                            <th>Active Days</th>
+                            <th>Avg/Day</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for member_id, stats in members_sorted %}
+                        <tr>
+                            <td>
+                                <span class="rank {% if loop.index == 1 %}rank-1{% elif loop.index == 2 %}rank-2{% elif loop.index == 3 %}rank-3{% else %}rank-other{% endif %}">
+                                    {{ loop.index }}
+                                </span>
+                            </td>
+                            <td class="member-name">{{ stats.member_name }}</td>
+                            <td class="metric">{{ stats.project_count }}</td>
+                            <td class="metric">{{ stats.total_sessions }}</td>
+                            <td class="metric">{{ "{:,}".format(stats.total_messages) }}</td>
+                            <td class="metric">{{ format_tokens(stats.total_input_tokens) }}</td>
+                            <td class="metric">{{ format_tokens(stats.total_output_tokens) }}</td>
+                            <td class="metric">{{ stats.active_days }}</td>
+                            <td class="metric-secondary">{{ "%.1f"|format(stats.avg_sessions_per_day) }} sess/day</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Rankings -->
+        <div class="section">
+            <h2>Rankings</h2>
+            <div class="rankings-grid">
+                <!-- Productivity Ranking -->
+                <div>
+                    <h3 style="margin-bottom: 1rem; color: var(--accent-green);">Productivity (Messages)</h3>
+                    <ul class="ranking-list">
+                        {% for member_id, rank in productivity_ranking[:5] %}
+                        <li class="ranking-item">
+                            <span class="rank {% if rank == 1 %}rank-1{% elif rank == 2 %}rank-2{% elif rank == 3 %}rank-3{% else %}rank-other{% endif %}">
+                                {{ rank }}
+                            </span>
+                            <div class="details">
+                                <div class="name">{{ members[member_id].member_name }}</div>
+                                <div class="stat">{{ "{:,}".format(members[member_id].total_messages) }} messages</div>
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                <!-- Token Usage Ranking -->
+                <div>
+                    <h3 style="margin-bottom: 1rem; color: var(--accent-orange);">Token Usage</h3>
+                    <ul class="ranking-list">
+                        {% for member_id, rank in token_usage_ranking[:5] %}
+                        <li class="ranking-item">
+                            <span class="rank {% if rank == 1 %}rank-1{% elif rank == 2 %}rank-2{% elif rank == 3 %}rank-3{% else %}rank-other{% endif %}">
+                                {{ rank }}
+                            </span>
+                            <div class="details">
+                                <div class="name">{{ members[member_id].member_name }}</div>
+                                <div class="stat">{{ format_tokens(members[member_id].total_input_tokens + members[member_id].total_output_tokens) }} tokens</div>
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Export Section -->
+        <div class="section">
+            <h2>Export Data</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                Download the team analytics data in your preferred format.
+            </p>
+            <div class="export-buttons">
+                {% if csv_path %}
+                <a href="{{ csv_path }}" class="btn btn-primary" download>Download CSV</a>
+                {% endif %}
+                {% if json_path %}
+                <a href="{{ json_path }}" class="btn btn-secondary" download>Download JSON</a>
+                {% endif %}
+            </div>
+        </div>
+
+        <footer>
+            <p>Generated by Claude Code Log Team Analytics</p>
+        </footer>
+    </div>
+
+    <script>
+        // Sort table by column
+        document.querySelectorAll('th').forEach((header, index) => {
+            header.style.cursor = 'pointer';
+            header.addEventListener('click', () => {
+                const table = header.closest('table');
+                const tbody = table.querySelector('tbody');
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+
+                const isNumeric = index > 1; // First two columns are rank and name
+                const isAsc = header.dataset.sort === 'asc';
+
+                rows.sort((a, b) => {
+                    const aVal = a.cells[index].textContent.trim();
+                    const bVal = b.cells[index].textContent.trim();
+
+                    if (isNumeric) {
+                        const aNum = parseFloat(aVal.replace(/[^0-9.-]/g, '')) || 0;
+                        const bNum = parseFloat(bVal.replace(/[^0-9.-]/g, '')) || 0;
+                        return isAsc ? aNum - bNum : bNum - aNum;
+                    } else {
+                        return isAsc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+                    }
+                });
+
+                header.dataset.sort = isAsc ? 'desc' : 'asc';
+                rows.forEach(row => tbody.appendChild(row));
+            });
+        });
+    </script>
+</body>
+</html>
