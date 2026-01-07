@@ -9,7 +9,7 @@ from typing import cast
 from unittest.mock import Mock, patch
 
 import pytest
-from textual.widgets import Button, Input, Label, Static, Switch
+from textual.widgets import Button, Input, Label, Static
 
 from claude_code_log.cache import CacheManager, SessionCacheData
 from claude_code_log.tui import ClaudeCodeLogTUI, SessionBrowser, run_session_browser, run_tui
@@ -106,7 +106,6 @@ class TestClaudeCodeLogTUI:
             await pilot.pause(0.1)
 
             # Check that main UI elements exist
-            assert app.query_one("#title-label", Label)
             assert app.query_one("#projects-section")  # Projects section always visible
             assert app.query_one("#convert-btn", Button)
             assert app.query_one("#upload-btn", Button)  # Upload to Google button
@@ -135,33 +134,6 @@ class TestClaudeCodeLogTUI:
             # Projects section should be visible
             projects_section = app.query_one("#projects-section")
             assert projects_section.display
-
-    @pytest.mark.asyncio
-    async def test_options_switches(self, temp_project_dir):
-        """Test options switches."""
-        app = ClaudeCodeLogTUI(temp_project_dir)
-
-        async with app.run_test() as pilot:
-            await pilot.pause(0.1)
-
-            # Get options switches
-            browser_switch = app.query_one("#opt-browser", Switch)
-            skip_switch = app.query_one("#opt-skip", Switch)
-            cache_switch = app.query_one("#opt-cache", Switch)
-
-            # Check default values
-            assert browser_switch.value is True
-            assert skip_switch.value is False
-            assert cache_switch.value is False
-
-            # Toggle switches
-            browser_switch.value = False
-            skip_switch.value = True
-            cache_switch.value = True
-
-            assert browser_switch.value is False
-            assert skip_switch.value is True
-            assert cache_switch.value is True
 
     @pytest.mark.asyncio
     async def test_date_inputs(self, temp_project_dir):
@@ -203,20 +175,6 @@ class TestClaudeCodeLogTUI:
 
             # Date should be cleared
             assert from_date.value == ""
-
-    @pytest.mark.asyncio
-    async def test_output_path_input(self, temp_project_dir):
-        """Test output path input."""
-        app = ClaudeCodeLogTUI(temp_project_dir)
-
-        async with app.run_test() as pilot:
-            await pilot.pause(0.1)
-
-            output_path = app.query_one("#output-path", Input)
-            assert output_path.value == ""
-
-            output_path.value = "/custom/output/path"
-            assert output_path.value == "/custom/output/path"
 
     @pytest.mark.asyncio
     async def test_log_function(self, temp_project_dir):
@@ -523,16 +481,9 @@ class TestIntegration:
                 assert len(app.projects) == 1
 
                 # Check UI elements
-                assert app.query_one("#title-label", Label)
                 assert app.query_one("#projects-section")  # Projects always visible
                 assert app.query_one("#convert-btn", Button)
-
-                # Toggle options
-                browser_switch = app.query_one("#opt-browser", Switch)
-                browser_switch.value = False
-                await pilot.pause(0.1)
-
-                assert browser_switch.value is False
+                assert app.query_one("#upload-btn", Button)
 
     @pytest.mark.asyncio
     async def test_empty_projects_handling(self):

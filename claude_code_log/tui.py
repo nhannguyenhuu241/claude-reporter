@@ -21,7 +21,6 @@ from textual.widgets import (
     Label,
     ProgressBar,
     Static,
-    Switch,
 )
 from textual.reactive import reactive
 
@@ -119,33 +118,18 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         padding: 1;
     }
 
-    /* Title section */
-    #title-section {
-        height: auto;
-    }
-
-    #title-label {
-        text-style: bold;
-        color: $primary;
-    }
-
-    #subtitle-label {
-        color: $text-muted;
-    }
-
     /* Project selection */
     #projects-section {
         height: auto;
-        max-height: 8;
+        max-height: 12;
         border: solid $primary;
-        margin-bottom: 1;
         padding: 1;
+        margin-bottom: 1;
     }
 
     #projects-header {
         height: auto;
         layout: horizontal;
-        margin-bottom: 1;
     }
 
     #projects-label {
@@ -155,40 +139,18 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
 
     .header-button {
         width: auto;
-        min-width: 12;
-        margin-left: 1;
+        min-width: 10;
     }
 
     #projects-scroll {
         height: auto;
-        max-height: 5;
+        max-height: 8;
     }
 
     .project-item {
         margin: 0;
         padding: 0;
         color: $success;
-    }
-
-    /* Output section */
-    #output-section {
-        height: auto;
-        layout: horizontal;
-        margin-bottom: 1;
-    }
-
-    #output-label {
-        width: 12;
-        margin-right: 1;
-    }
-
-    #output-path {
-        width: 1fr;
-        margin-right: 1;
-    }
-
-    #output-browse {
-        width: 12;
     }
 
     /* Date filters section */
@@ -199,13 +161,12 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     }
 
     .date-label {
-        width: 6;
-        margin-right: 1;
+        width: 5;
     }
 
     .date-input {
-        width: 14;
-        margin-right: 2;
+        width: 12;
+        margin-right: 1;
     }
 
     .date-clear {
@@ -213,82 +174,39 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         margin-right: 2;
     }
 
-    /* Options section - horizontal layout */
-    #options-section {
+    /* Action buttons section */
+    #action-section {
         height: auto;
         layout: horizontal;
         margin-bottom: 1;
     }
 
-    #options-label {
-        text-style: bold;
-        width: 8;
+    #convert-btn {
+        width: 1fr;
         margin-right: 1;
     }
 
-    .option-group {
-        layout: horizontal;
-        width: auto;
-        margin-right: 2;
-    }
-
-    .option-switch {
-        margin: 0;
-        padding: 0;
-        width: auto;
-    }
-
-    .option-label {
-        margin-left: 1;
-        width: auto;
+    #upload-btn {
+        width: 1fr;
     }
 
     /* Status section */
     #status-section {
         height: auto;
-        min-height: 4;
         border: solid $surface;
         padding: 1;
     }
 
-    #status-label {
-        text-style: bold;
-    }
-
     #status-log {
         height: auto;
-        min-height: 2;
-        max-height: 4;
+        min-height: 3;
+        max-height: 6;
         overflow-y: auto;
         color: $text-muted;
     }
 
     #progress-bar {
-        margin-top: 0;
-    }
-
-    /* Action buttons section */
-    #action-section {
-        height: auto;
-        layout: horizontal;
         margin-top: 1;
-    }
-
-    #convert-btn {
-        width: 1fr;
-        margin-right: 1;
-        min-width: 20;
-    }
-
-    #upload-btn {
-        width: 1fr;
-        margin-right: 1;
-        min-width: 20;
-    }
-
-    #clear-btn {
-        width: 15;
-        min-width: 12;
     }
     """
 
@@ -321,25 +239,14 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         yield Header()
 
         with Vertical(id="main-container"):
-            # Title section
-            with Vertical(id="title-section"):
-                yield Label("Claude Code Log Converter", id="title-label")
-                yield Label("Convert Claude Code transcript JSONL files to HTML", id="subtitle-label")
-
             # Project list (all projects always selected)
             with Vertical(id="projects-section"):
                 with Horizontal(id="projects-header"):
-                    yield Label("Projects (all selected):", id="projects-label")
+                    yield Label("Projects:", id="projects-label")
                     yield Button("Refresh", id="refresh-btn", classes="header-button")
 
                 with VerticalScroll(id="projects-scroll"):
                     yield Static("Loading projects...", id="projects-loading")
-
-            # Output section
-            with Horizontal(id="output-section"):
-                yield Label("Output:", id="output-label")
-                yield Input(placeholder="Optional output path (leave empty for default)", id="output-path")
-                yield Button("Browse", id="output-browse")
 
             # Date filters section
             with Horizontal(id="date-section"):
@@ -347,35 +254,19 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
                 yield Input(placeholder="dd/mm/yyyy", id="from-date", classes="date-input")
                 yield Button("×", id="clear-from", classes="date-clear")
                 yield Label("To:", classes="date-label")
-                # Default to today
                 today = datetime.now().strftime("%d/%m/%Y")
                 yield Input(value=today, placeholder="dd/mm/yyyy", id="to-date", classes="date-input")
                 yield Button("×", id="clear-to", classes="date-clear")
-
-            # Options section - horizontal layout
-            with Horizontal(id="options-section"):
-                yield Label("Options:", id="options-label")
-                with Horizontal(classes="option-group"):
-                    yield Switch(value=True, id="opt-browser", classes="option-switch")
-                    yield Label("Browser", classes="option-label")
-                with Horizontal(classes="option-group"):
-                    yield Switch(value=False, id="opt-skip", classes="option-switch")
-                    yield Label("Skip sessions", classes="option-label")
-                with Horizontal(classes="option-group"):
-                    yield Switch(value=False, id="opt-cache", classes="option-switch")
-                    yield Label("Clear cache", classes="option-label")
-
-            # Status section
-            with Vertical(id="status-section"):
-                yield Label("Status:", id="status-label")
-                yield Static("Ready to convert", id="status-log")
-                yield ProgressBar(id="progress-bar", total=100, show_eta=False)
 
             # Action buttons section
             with Horizontal(id="action-section"):
                 yield Button("Convert", id="convert-btn", variant="primary")
                 yield Button("Upload to Google", id="upload-btn", variant="success")
-                yield Button("Clear Log", id="clear-btn")
+
+            # Status section
+            with Vertical(id="status-section"):
+                yield Static("Ready", id="status-log")
+                yield ProgressBar(id="progress-bar", total=100, show_eta=False)
 
         yield Footer()
 
@@ -441,16 +332,12 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
 
         if button_id == "convert-btn":
             self._do_convert()
-        elif button_id == "clear-btn":
-            self._clear_log()
         elif button_id == "refresh-btn":
             self.action_refresh()
         elif button_id == "clear-from":
             self.query_one("#from-date", Input).value = ""
         elif button_id == "clear-to":
             self.query_one("#to-date", Input).value = ""
-        elif button_id == "output-browse":
-            self.notify("Browse: Enter path manually or use Tab to navigate", timeout=3)
         elif button_id == "upload-btn":
             self._do_upload_to_google()
 
@@ -479,18 +366,13 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             progress = self.query_one("#progress-bar", ProgressBar)
             progress.update(progress=0)
 
-            # Get options
-            open_browser = self.query_one("#opt-browser", Switch).value
-            skip_sessions = self.query_one("#opt-skip", Switch).value
-            clear_cache = self.query_one("#opt-cache", Switch).value
+            # Default options (hidden from UI)
+            open_browser = True
+            skip_sessions = False
 
             # Get date filters
             from_date = self.query_one("#from-date", Input).value.strip() or None
             to_date = self.query_one("#to-date", Input).value.strip() or None
-
-            # Get output path
-            output_path_str = self.query_one("#output-path", Input).value.strip()
-            output_path = Path(output_path_str) if output_path_str else None
 
             # Get all projects (all always selected)
             all_projects = [project["path"] for project in self.projects]
@@ -503,16 +385,6 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             self.add_log(f"Processing {len(all_projects)} projects...")
             progress.update(progress=10)
 
-            if clear_cache:
-                self.add_log("Clearing cache...")
-                for project in all_projects:
-                    try:
-                        cache_manager = CacheManager(project, get_library_version())
-                        cache_manager.clear_cache()
-                    except Exception:
-                        pass
-                progress.update(progress=20)
-
             # Use process_selected_projects to create linked index.html
             self.add_log("Generating HTML files with index...")
             progress.update(progress=40)
@@ -522,9 +394,9 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
                     selected_project_dirs=all_projects,
                     from_date=from_date,
                     to_date=to_date,
-                    use_cache=not clear_cache,
+                    use_cache=True,
                     generate_individual_sessions=not skip_sessions,
-                    output_dir=output_path,
+                    output_dir=None,
                 )
                 progress.update(progress=90)
 
