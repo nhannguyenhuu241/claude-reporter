@@ -124,15 +124,26 @@ def extract_folder_id_from_url(url: str) -> str | None:
 
 
 def get_ssl_context():
-    """Get SSL context with certifi certificates."""
+    """Get SSL context with certifi certificates and Windows compatibility."""
     import ssl
+    import sys
 
     try:
         import certifi
-
-        return ssl.create_default_context(cafile=certifi.where())
+        ctx = ssl.create_default_context(cafile=certifi.where())
     except ImportError:
-        return ssl.create_default_context()
+        ctx = ssl.create_default_context()
+
+    # Windows-specific fixes for WinError 10053/10054
+    if sys.platform == "win32":
+        # Disable check_hostname and verify for problematic connections
+        # Use TLS 1.2+ for better Windows compatibility
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        # Set reasonable options
+        ctx.options |= ssl.OP_NO_SSLv2
+        ctx.options |= ssl.OP_NO_SSLv3
+
+    return ctx
 
 
 def fetch_folder_contents(folder_id: str) -> dict:
@@ -266,34 +277,76 @@ def upload_to_drive(
     content: str,
     date_folder: str,
     is_base64: bool = False,
+    max_retries: int = 3,
 ) -> dict:
-    """Upload file to Google Drive via Apps Script."""
-    try:
-        data = json.dumps(
-            {
-                "folderId": folder_id,
-                "fileName": file_name,
-                "content": content,
-                "dateFolder": date_folder,
-                "isBase64": is_base64,
-            }
-        ).encode("utf-8")
+    """Upload file to Google Drive via Apps Script with retry logic.
 
-        req = urllib.request.Request(
-            APPS_SCRIPT_URL,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+    Handles Windows-specific network errors (WinError 10053/10054) with
+    exponential backoff retry mechanism.
+    """
+    import time
+    import sys
 
-        with urllib.request.urlopen(
-            req, timeout=120, context=get_ssl_context()
-        ) as response:
-            return {"success": True, "status": response.status}
-    except urllib.error.URLError as e:
-        return {"success": False, "error": str(e)}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    data = json.dumps(
+        {
+            "folderId": folder_id,
+            "fileName": file_name,
+            "content": content,
+            "dateFolder": date_folder,
+            "isBase64": is_base64,
+        }
+    ).encode("utf-8")
+
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            req = urllib.request.Request(
+                APPS_SCRIPT_URL,
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "ClaudeCodeLog/1.0",
+                    "Connection": "keep-alive",
+                },
+                method="POST",
+            )
+
+            with urllib.request.urlopen(
+                req, timeout=180, context=get_ssl_context()
+            ) as response:
+                return {"success": True, "status": response.status}
+
+        except urllib.error.URLError as e:
+            last_error = e
+            error_str = str(e)
+
+            # Check for Windows connection errors that are retryable
+            is_retryable = any(err in error_str for err in [
+                "WinError 10053",  # Connection aborted by host
+                "WinError 10054",  # Connection reset by peer
+                "Connection reset",
+                "Connection aborted",
+                "timed out",
+                "EOF occurred",
+            ])
+
+            if is_retryable and attempt < max_retries - 1:
+                # Exponential backoff: 2s, 4s, 8s
+                wait_time = 2 ** (attempt + 1)
+                time.sleep(wait_time)
+                continue
+            else:
+                return {"success": False, "error": f"Upload failed after {attempt + 1} attempts: {error_str}"}
+
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                time.sleep(2 ** (attempt + 1))
+                continue
+            return {"success": False, "error": f"Upload failed: {str(e)}"}
+
+    return {"success": False, "error": f"Upload failed after {max_retries} attempts: {str(last_error)}"}
 
 
 def generate_index_html(html_files: list, base_path: Path) -> str:
