@@ -122,7 +122,6 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     /* Title section */
     #title-section {
         height: auto;
-        margin-bottom: 1;
     }
 
     #title-label {
@@ -137,7 +136,7 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     /* Project selection */
     #projects-section {
         height: auto;
-        max-height: 15;
+        max-height: 8;
         border: solid $primary;
         margin-bottom: 1;
         padding: 1;
@@ -162,7 +161,7 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
 
     #projects-scroll {
         height: auto;
-        max-height: 10;
+        max-height: 5;
     }
 
     .project-item {
@@ -247,27 +246,25 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
     /* Status section */
     #status-section {
         height: auto;
-        min-height: 8;
+        min-height: 4;
         border: solid $surface;
         padding: 1;
-        margin-bottom: 1;
     }
 
     #status-label {
         text-style: bold;
-        margin-bottom: 1;
     }
 
     #status-log {
         height: auto;
-        min-height: 5;
-        max-height: 10;
+        min-height: 2;
+        max-height: 4;
         overflow-y: auto;
         color: $text-muted;
     }
 
     #progress-bar {
-        margin-top: 1;
+        margin-top: 0;
     }
 
     /* Action buttons section */
