@@ -214,22 +214,34 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         margin-right: 2;
     }
 
-    /* Options section */
+    /* Options section - horizontal layout */
     #options-section {
         height: auto;
-        border: solid $secondary;
-        padding: 1;
+        layout: horizontal;
         margin-bottom: 1;
     }
 
     #options-label {
         text-style: bold;
-        margin-bottom: 1;
+        width: 8;
+        margin-right: 1;
+    }
+
+    .option-group {
+        layout: horizontal;
+        width: auto;
+        margin-right: 2;
     }
 
     .option-switch {
         margin: 0;
         padding: 0;
+        width: auto;
+    }
+
+    .option-label {
+        margin-left: 1;
+        width: auto;
     }
 
     /* Status section */
@@ -343,15 +355,18 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
                 yield Input(value=today, placeholder="dd/mm/yyyy", id="to-date", classes="date-input")
                 yield Button("×", id="clear-to", classes="date-clear")
 
-            # Options section
-            with Vertical(id="options-section"):
+            # Options section - horizontal layout
+            with Horizontal(id="options-section"):
                 yield Label("Options:", id="options-label")
-                yield Switch(value=True, id="opt-browser", classes="option-switch")
-                yield Label("  Open in browser after conversion", id="opt-browser-label")
-                yield Switch(value=False, id="opt-skip", classes="option-switch")
-                yield Label("  Skip individual session files", id="opt-skip-label")
-                yield Switch(value=False, id="opt-cache", classes="option-switch")
-                yield Label("  Clear cache before processing", id="opt-cache-label")
+                with Horizontal(classes="option-group"):
+                    yield Switch(value=True, id="opt-browser", classes="option-switch")
+                    yield Label("Browser", classes="option-label")
+                with Horizontal(classes="option-group"):
+                    yield Switch(value=False, id="opt-skip", classes="option-switch")
+                    yield Label("Skip sessions", classes="option-label")
+                with Horizontal(classes="option-group"):
+                    yield Switch(value=False, id="opt-cache", classes="option-switch")
+                    yield Label("Clear cache", classes="option-label")
 
             # Status section
             with Vertical(id="status-section"):
