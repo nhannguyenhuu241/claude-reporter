@@ -153,6 +153,21 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
         color: $success;
     }
 
+    /* Output path section */
+    #output-section {
+        height: auto;
+        layout: horizontal;
+        margin-bottom: 1;
+    }
+
+    .output-label {
+        width: 8;
+    }
+
+    .output-input {
+        width: 1fr;
+    }
+
     /* Date filters section */
     #date-section {
         height: auto;
@@ -247,6 +262,11 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
 
                 with VerticalScroll(id="projects-scroll"):
                     yield Static("Loading projects...", id="projects-loading")
+
+            # Output path section
+            with Horizontal(id="output-section"):
+                yield Label("Output:", classes="output-label")
+                yield Input(placeholder="Leave empty for default (~/.claude/projects/)", id="output-path", classes="output-input")
 
             # Date filters section
             with Horizontal(id="date-section"):
@@ -370,6 +390,10 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
             open_browser = True
             skip_sessions = False
 
+            # Get output path
+            output_path_str = self.query_one("#output-path", Input).value.strip()
+            output_dir = Path(output_path_str) if output_path_str else None
+
             # Get date filters
             from_date = self.query_one("#from-date", Input).value.strip() or None
             to_date = self.query_one("#to-date", Input).value.strip() or None
@@ -383,6 +407,8 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
                 return
 
             self.add_log(f"Processing {len(all_projects)} projects...")
+            if output_dir:
+                self.add_log(f"Output directory: {output_dir}")
             progress.update(progress=10)
 
             # Use process_selected_projects to create linked index.html
@@ -396,7 +422,7 @@ class ClaudeCodeLogTUI(App[Optional[str]]):
                     to_date=to_date,
                     use_cache=True,
                     generate_individual_sessions=not skip_sessions,
-                    output_dir=None,
+                    output_dir=output_dir,
                 )
                 progress.update(progress=90)
 

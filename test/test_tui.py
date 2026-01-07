@@ -136,6 +136,24 @@ class TestClaudeCodeLogTUI:
             assert projects_section.display
 
     @pytest.mark.asyncio
+    async def test_output_path_input(self, temp_project_dir):
+        """Test output path input field."""
+        app = ClaudeCodeLogTUI(temp_project_dir)
+
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+
+            # Get output path input
+            output_path = app.query_one("#output-path", Input)
+
+            # Should be empty by default
+            assert output_path.value == ""
+
+            # Test setting a value
+            output_path.value = "/tmp/output"
+            assert output_path.value == "/tmp/output"
+
+    @pytest.mark.asyncio
     async def test_date_inputs(self, temp_project_dir):
         """Test date input fields."""
         app = ClaudeCodeLogTUI(temp_project_dir)
