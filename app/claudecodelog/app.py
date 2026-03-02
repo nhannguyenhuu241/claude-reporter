@@ -2741,96 +2741,99 @@ class ClaudeCodeLogApp(toga.App):
         )
         content.add(title)
 
-        # Step 1: Select root folder
+        # Hidden field to store root path (auto-detected)
+        self._team_root_path = toga.TextInput(style=Pack(height=0, width=0))
+
+        # Step 1: Department list (phòng ban) - auto-loaded
         step1_box = toga.Box(style=Pack(direction=COLUMN, margin_bottom=10))
         step1_label = toga.Label(
-            "1️⃣ Chọn thư mục gốc (chứa các phòng ban):",
+            "1️⃣ Chọn phòng ban:",
             style=Pack(font_weight="bold", margin_bottom=5),
         )
         step1_box.add(step1_label)
-
-        folder_row = toga.Box(style=Pack(direction=ROW, margin_bottom=10))
-        self._team_root_path = toga.TextInput(
-            placeholder="Chọn thư mục chứa dữ liệu team...",
-            style=Pack(flex=1, margin_right=5),
-        )
-        folder_row.add(self._team_root_path)
-
-        browse_btn = toga.Button(
-            "Browse",
-            on_press=self._browse_team_root,
-            style=Pack(width=80),
-        )
-        folder_row.add(browse_btn)
-
-        load_btn = toga.Button(
-            "Load",
-            on_press=self._load_team_folders,
-            style=Pack(width=80, margin_left=5),
-        )
-        folder_row.add(load_btn)
-
-        step1_box.add(folder_row)
-        content.add(step1_box)
-
-        # Step 2: Department list (phòng ban)
-        step2_box = toga.Box(style=Pack(direction=COLUMN, margin_bottom=10))
-        step2_label = toga.Label(
-            "2️⃣ Chọn phòng ban:",
-            style=Pack(font_weight="bold", margin_bottom=5),
-        )
-        step2_box.add(step2_label)
 
         self._dept_selection = toga.Selection(
             items=["-- Chọn phòng ban --"],
             on_change=self._on_dept_selected,
             style=Pack(flex=1, margin_bottom=5),
         )
-        step2_box.add(self._dept_selection)
-        content.add(step2_box)
+        step1_box.add(self._dept_selection)
+        content.add(step1_box)
 
-        # Step 3: Member list with checkboxes (using Table with selection)
-        step3_box = toga.Box(style=Pack(direction=COLUMN, flex=1))
-        step3_header = toga.Box(style=Pack(direction=ROW, margin_bottom=5))
-        step3_label = toga.Label(
-            "3️⃣ Chọn thành viên để phân tích:",
+        # Step 2: Member list with checkboxes (using Table with selection)
+        step2_box = toga.Box(style=Pack(direction=COLUMN, flex=1))
+        step2_header = toga.Box(style=Pack(direction=ROW, margin_bottom=5))
+        step2_label = toga.Label(
+            "2️⃣ Chọn thành viên để phân tích:",
             style=Pack(font_weight="bold", flex=1),
         )
-        step3_header.add(step3_label)
+        step2_header.add(step2_label)
 
         select_all_btn = toga.Button(
             "Chọn tất cả",
             on_press=self._select_all_members,
             style=Pack(width=100, margin_right=5),
         )
-        step3_header.add(select_all_btn)
+        step2_header.add(select_all_btn)
 
         deselect_all_btn = toga.Button(
             "Bỏ chọn tất cả",
             on_press=self._deselect_all_members,
             style=Pack(width=110),
         )
-        step3_header.add(deselect_all_btn)
+        step2_header.add(deselect_all_btn)
 
-        step3_box.add(step3_header)
+        step2_box.add(step2_header)
 
         # Member table with multi-selection
         self._member_table = toga.Table(
-            headings=["✓", "Thành viên", "Số project", "Số file"],
+            headings=["Chon", "Thanh vien", "So project", "So file"],
             data=[],
             multiple_select=True,
+            on_select=self._on_member_selected,
             style=Pack(flex=1),
         )
-        step3_box.add(self._member_table)
-        content.add(step3_box)
+        step2_box.add(self._member_table)
+        content.add(step2_box)
 
-        # Step 4: Output options
-        step4_box = toga.Box(style=Pack(direction=COLUMN, margin_top=10))
-        step4_label = toga.Label(
-            "4️⃣ Thư mục xuất báo cáo:",
+        # Step 2.5: Folder tree view for selected member
+        tree_box = toga.Box(style=Pack(direction=COLUMN, flex=1, margin_top=5))
+        tree_header = toga.Box(style=Pack(direction=ROW, margin_bottom=5))
+        self._tree_label = toga.Label(
+            "📁 Nội dung thư mục thành viên:",
+            style=Pack(font_weight="bold", flex=1),
+        )
+        tree_header.add(self._tree_label)
+
+        back_btn = toga.Button(
+            "⬆️ Quay lại",
+            on_press=self._tree_go_back,
+            style=Pack(width=100),
+        )
+        tree_header.add(back_btn)
+        tree_box.add(tree_header)
+
+        # Folder contents table (shows files/folders inside selected member)
+        self._folder_tree_table = toga.Table(
+            headings=["Loai", "Ten", "Ngay cap nhat"],
+            data=[],
+            on_activate=self._on_folder_item_activate,
+            style=Pack(flex=1, height=150),
+        )
+        tree_box.add(self._folder_tree_table)
+        content.add(tree_box)
+
+        # Folder navigation stack
+        self._folder_nav_stack = []  # Stack of {id, name} for back navigation
+        self._current_folder_path = ""  # Current path display
+
+        # Step 3: Output options
+        step3_box = toga.Box(style=Pack(direction=COLUMN, margin_top=10))
+        step3_label = toga.Label(
+            "3️⃣ Thư mục xuất báo cáo:",
             style=Pack(font_weight="bold", margin_bottom=5),
         )
-        step4_box.add(step4_label)
+        step3_box.add(step3_label)
 
         output_row = toga.Box(style=Pack(direction=ROW, margin_bottom=10))
         self._team_output_path = toga.TextInput(
@@ -2846,8 +2849,8 @@ class ClaudeCodeLogApp(toga.App):
         )
         output_row.add(output_browse_btn)
 
-        step4_box.add(output_row)
-        content.add(step4_box)
+        step3_box.add(output_row)
+        content.add(step3_box)
 
         # Status and buttons
         status_box = toga.Box(style=Pack(direction=COLUMN, margin_top=10))
@@ -2884,6 +2887,100 @@ class ClaudeCodeLogApp(toga.App):
 
         self._team_window.content = content
         self._team_window.show()
+
+        # Auto-detect and load Google Drive ISC-Claude-Report folder
+        self._auto_load_team_folder()
+
+    def _auto_load_team_folder(self):
+        """Auto-load departments from Google Drive ISC-Claude-Report folder."""
+        # ISC-Claude-Report folder ID from Google Drive
+        ISC_FOLDER_ID = "1pNa1mQkyEQwAf6A7-egf_wXq-1UTO_w3"
+
+        self._team_root_folder_id = ISC_FOLDER_ID
+        self._team_report_status.text = "🔄 Đang tải danh sách phòng ban từ Google Drive..."
+        self.log(f"📁 Loading departments from Google Drive folder: {ISC_FOLDER_ID}")
+
+        # Load departments asynchronously using API
+        asyncio.create_task(self._load_departments_from_drive_api())
+
+    async def _load_departments_from_drive_api(self):
+        """Load department folders from Google Drive via Apps Script API."""
+        try:
+            result = await asyncio.to_thread(fetch_folder_contents, self._team_root_folder_id)
+
+            # fetch_folder_contents returns: {success: True, data: {folderId, folderName, items: [...]}}
+            if not result.get("success"):
+                error_msg = result.get("error", "Không thể kết nối")
+                self._team_report_status.text = f"❌ Lỗi: {error_msg}"
+                self.log(f"❌ Error: {error_msg}")
+                return
+
+            data = result.get("data", {})
+            items = data.get("items", [])
+
+            if items:
+                self._team_departments = []
+                for item in items:
+                    if item.get("type") == "folder":
+                        self._team_departments.append({
+                            "name": item.get("name"),
+                            "id": item.get("id"),
+                            "member_count": 0,  # Will be loaded when selected
+                        })
+
+                # Sort by name
+                self._team_departments.sort(key=lambda x: x["name"])
+
+                # Update department selection dropdown
+                dept_items = ["-- Chọn phòng ban --"] + [d["name"] for d in self._team_departments]
+                self._dept_selection.items = dept_items
+
+                self._team_report_status.text = f"✅ Tìm thấy {len(self._team_departments)} phòng ban"
+                self.log(f"📁 Loaded {len(self._team_departments)} departments from Google Drive")
+            else:
+                self._team_report_status.text = "❌ Không tìm thấy phòng ban nào"
+                self.log("❌ No departments found")
+        except Exception as e:
+            self._team_report_status.text = f"❌ Lỗi kết nối: {e}"
+            self.log(f"❌ Exception loading departments: {e}")
+
+    async def _load_departments_from_drive(self):
+        """Load department folders from Google Drive."""
+        try:
+            result = await asyncio.to_thread(fetch_folder_contents, self._team_root_folder_id)
+
+            if result.get("success"):
+                items = result.get("files", [])
+                # Filter only folders (departments)
+                self._team_departments = []
+                for item in items:
+                    if item.get("mimeType") == "application/vnd.google-apps.folder":
+                        self._team_departments.append({
+                            "name": item.get("name"),
+                            "id": item.get("id"),
+                            "member_count": 0,  # Will count when selected
+                        })
+
+                if not self._team_departments:
+                    self._team_report_status.text = "❌ Không tìm thấy phòng ban nào"
+                    return
+
+                # Sort by name
+                self._team_departments.sort(key=lambda x: x["name"])
+
+                # Update department selection dropdown
+                dept_items = ["-- Chọn phòng ban --"] + [d["name"] for d in self._team_departments]
+                self._dept_selection.items = dept_items
+
+                self._team_report_status.text = f"✅ Tìm thấy {len(self._team_departments)} phòng ban"
+                self.log(f"📁 Loaded {len(self._team_departments)} departments from Google Drive")
+            else:
+                error_msg = result.get("error", "Unknown error")
+                self._team_report_status.text = f"❌ Lỗi: {error_msg}"
+                self.log(f"❌ Error loading departments: {error_msg}")
+        except Exception as e:
+            self._team_report_status.text = f"❌ Lỗi kết nối: {e}"
+            self.log(f"❌ Exception loading departments: {e}")
 
     def _browse_team_root(self, widget):
         """Browse for team root folder."""
@@ -2944,62 +3041,476 @@ class ClaudeCodeLogApp(toga.App):
 
     def _on_dept_selected(self, widget):
         """Handle department selection change."""
-        selected_idx = self._dept_selection.items.index(self._dept_selection.value) if self._dept_selection.value else 0
+        selected_value = self._dept_selection.value
 
-        if selected_idx == 0:  # "-- Chọn phòng ban --"
+        if not selected_value or selected_value == "-- Chọn phòng ban --":
             self._member_table.data = []
             self._team_members = []
             return
 
-        dept = self._team_departments[selected_idx - 1]
-        self._load_members_for_dept(dept)
+        # Extract department name from "Name (X thành viên)" format
+        dept_name = selected_value.split(" (")[0] if " (" in selected_value else selected_value
 
-    def _load_members_for_dept(self, dept):
-        """Load members for selected department."""
-        self._team_members = []
-        dept_path = dept["path"]
+        # Find department by name
+        dept = None
+        for d in self._team_departments:
+            if d["name"] == dept_name:
+                dept = d
+                break
 
+        if dept:
+            # Load members from Google Drive API
+            self._team_report_status.text = f"🔄 Đang tải thành viên của {dept['name']}..."
+            asyncio.create_task(self._load_members_from_drive_api(dept))
+
+    async def _load_members_from_drive_api(self, dept):
+        """Load members for selected department from Google Drive API."""
         try:
-            for item in sorted(dept_path.iterdir()):
-                if item.is_dir() and not item.name.startswith('.'):
-                    # Count projects and files
-                    project_count = 0
-                    file_count = 0
+            result = await asyncio.to_thread(fetch_folder_contents, dept["id"])
 
-                    # Look for projects subfolder or direct JSONL files
-                    projects_dir = item / "projects"
-                    if projects_dir.exists():
-                        for proj in projects_dir.iterdir():
-                            if proj.is_dir():
-                                project_count += 1
-                                file_count += sum(1 for f in proj.glob("*.jsonl"))
-                    else:
-                        # Check for direct JSONL files
-                        file_count = sum(1 for f in item.rglob("*.jsonl"))
+            # fetch_folder_contents returns: {success: True, data: {folderId, folderName, items: [...]}}
+            if not result.get("success"):
+                error_msg = result.get("error", "Không thể kết nối")
+                self._team_report_status.text = f"❌ Lỗi: {error_msg}"
+                return
 
-                    self._team_members.append({
-                        "name": item.name,
-                        "path": item,
-                        "project_count": project_count,
-                        "file_count": file_count,
-                        "selected": True,  # Selected by default
-                    })
+            data = result.get("data", {})
+            items = data.get("items", [])
+
+            if items:
+                self._team_members = []
+                for item in items:
+                    if item.get("type") == "folder":
+                        self._team_members.append({
+                            "name": item.get("name"),
+                            "id": item.get("id"),
+                            "project_count": 0,
+                            "file_count": 0,
+                            "selected": True,  # Selected by default
+                        })
+
+                # Sort by name
+                self._team_members.sort(key=lambda x: x["name"])
+
+                # Update table
+                table_data = []
+                for m in self._team_members:
+                    table_data.append((
+                        "✓" if m["selected"] else "",
+                        m["name"],
+                        "-",
+                        "-",
+                    ))
+
+                self._member_table.data = table_data
+                self._team_report_status.text = f"📋 {len(self._team_members)} thành viên trong phòng {dept['name']}"
+                self.log(f"👥 Loaded {len(self._team_members)} members from {dept['name']}")
+            else:
+                self._member_table.data = []
+                self._team_members = []
+                self._team_report_status.text = f"⚠️ Không có thành viên trong {dept['name']}"
         except Exception as e:
-            self._team_report_status.text = f"❌ Lỗi đọc thành viên: {e}"
+            self._team_report_status.text = f"❌ Lỗi: {e}"
+            self.log(f"❌ Error loading members: {e}")
+
+    async def _load_members_from_drive(self, dept):
+        """Load members for selected department from Google Drive."""
+        try:
+            result = await asyncio.to_thread(fetch_folder_contents, dept["id"])
+
+            if result.get("success"):
+                items = result.get("files", [])
+                self._team_members = []
+
+                for item in items:
+                    if item.get("mimeType") == "application/vnd.google-apps.folder":
+                        self._team_members.append({
+                            "name": item.get("name"),
+                            "id": item.get("id"),
+                            "project_count": 0,  # Cannot count from Drive easily
+                            "file_count": 0,
+                            "selected": True,  # Selected by default
+                        })
+
+                # Sort by name
+                self._team_members.sort(key=lambda x: x["name"])
+
+                # Update table
+                table_data = []
+                for m in self._team_members:
+                    table_data.append((
+                        "✓" if m["selected"] else "",
+                        m["name"],
+                        "-",  # Project count not available
+                        "-",  # File count not available
+                    ))
+
+                self._member_table.data = table_data
+                self._team_report_status.text = f"📋 {len(self._team_members)} thành viên trong phòng {dept['name']}"
+                self.log(f"👥 Loaded {len(self._team_members)} members from {dept['name']}")
+            else:
+                error_msg = result.get("error", "Unknown error")
+                self._team_report_status.text = f"❌ Lỗi: {error_msg}"
+        except Exception as e:
+            self._team_report_status.text = f"❌ Lỗi: {e}"
+
+    def _on_member_selected(self, widget):
+        """Handle member selection - find and show latest zip files."""
+        if not widget.selection:
             return
 
-        # Update table
-        table_data = []
-        for m in self._team_members:
-            table_data.append((
-                "✓" if m["selected"] else "",
-                m["name"],
-                str(m["project_count"]),
-                str(m["file_count"]),
-            ))
+        # Get selected member row
+        selected_row = widget.selection
+        if not selected_row:
+            return
 
-        self._member_table.data = table_data
-        self._team_report_status.text = f"📋 {len(self._team_members)} thành viên trong phòng {dept['name']}"
+        # Find member by name (column 1 is the name)
+        member_name = selected_row.thanh_vien if hasattr(selected_row, 'thanh_vien') else None
+        if not member_name:
+            # Try accessing by index
+            try:
+                member_name = selected_row[1]  # Second column is name
+            except (IndexError, TypeError):
+                return
+
+        # Find member in our list
+        member = None
+        for m in self._team_members:
+            if m["name"] == member_name:
+                member = m
+                break
+
+        if member:
+            # Reset navigation stack and load member's folder tree
+            self._folder_nav_stack = []
+            self._current_folder_path = member["name"]
+            self._current_folder_id = member["id"]
+            self._selected_member_id = member["id"]
+            self._selected_member_name = member["name"]
+            self._selected_zip_files = []  # Clear selected ZIPs
+            self._tree_label.text = f"📁 {member['name']}/"
+            asyncio.create_task(self._load_folder_tree(member["id"]))
+
+    async def _load_folder_tree(self, folder_id):
+        """Load and display folder contents in tree view."""
+        try:
+            result = await asyncio.to_thread(fetch_folder_contents, folder_id)
+
+            if not result.get("success"):
+                self._folder_tree_table.data = [("❌", "Lỗi tải dữ liệu", "-")]
+                return
+
+            data = result.get("data", {})
+            items = data.get("items", [])
+
+            # Store items for navigation
+            self._current_folder_items = items
+
+            table_data = []
+            for item in items:
+                item_type = "📁" if item.get("type") == "folder" else "📄"
+                name = item.get("name", "Unknown")
+                updated = item.get("lastUpdated", "-")
+                if updated and updated != "-":
+                    # Format date nicely
+                    try:
+                        updated = updated[:10]  # Just the date part
+                    except Exception:
+                        pass
+                table_data.append((item_type, name, updated))
+
+            if not table_data:
+                table_data = [("📭", "(Thư mục trống)", "-")]
+
+            self._folder_tree_table.data = table_data
+
+        except Exception as e:
+            self._folder_tree_table.data = [("❌", f"Lỗi: {e}", "-")]
+
+    async def _load_member_zip_files(self, member_folder_id, member_name):
+        """Load zip files from member folder - prioritize latest dated folder."""
+        import re
+        from datetime import datetime
+
+        try:
+            # Fetch member folder contents
+            result = await asyncio.to_thread(fetch_folder_contents, member_folder_id)
+
+            if not result.get("success"):
+                self._folder_tree_table.data = [("❌", "Lỗi tải dữ liệu", "-")]
+                self._tree_label.text = f"📁 {member_name}/ (Lỗi)"
+                return
+
+            data = result.get("data", {})
+            items = data.get("items", [])
+
+            # Separate folders (potential date folders) and zip files
+            date_folders = []
+            zip_files = []
+
+            # Date patterns: YYYY-MM-DD, DD-MM-YYYY, YYYY_MM_DD, DD_MM_YYYY
+            date_patterns = [
+                (r'^(\d{4})-(\d{2})-(\d{2})$', '%Y-%m-%d'),      # 2025-01-07
+                (r'^(\d{2})-(\d{2})-(\d{4})$', '%d-%m-%Y'),      # 07-01-2025
+                (r'^(\d{4})_(\d{2})_(\d{2})$', '%Y_%m_%d'),      # 2025_01_07
+                (r'^(\d{2})_(\d{2})_(\d{4})$', '%d_%m_%Y'),      # 07_01_2025
+            ]
+
+            for item in items:
+                name = item.get("name", "")
+                item_type = item.get("type", "")
+
+                if item_type == "folder":
+                    # Check if folder name matches a date pattern
+                    for pattern, date_fmt in date_patterns:
+                        if re.match(pattern, name):
+                            try:
+                                parsed_date = datetime.strptime(name, date_fmt)
+                                date_folders.append({
+                                    "item": item,
+                                    "date": parsed_date,
+                                    "name": name
+                                })
+                            except ValueError:
+                                pass
+                            break
+                elif name.lower().endswith('.zip'):
+                    zip_files.append(item)
+
+            # If we found date folders, use the latest one
+            if date_folders:
+                # Sort by date descending
+                date_folders.sort(key=lambda x: x["date"], reverse=True)
+                latest_folder = date_folders[0]
+
+                # Fetch contents of latest dated folder
+                latest_result = await asyncio.to_thread(
+                    fetch_folder_contents, latest_folder["item"]["id"]
+                )
+
+                if latest_result.get("success"):
+                    latest_data = latest_result.get("data", {})
+                    latest_items = latest_data.get("items", [])
+
+                    # Find zip files in the latest folder
+                    for item in latest_items:
+                        if item.get("name", "").lower().endswith('.zip'):
+                            zip_files.append(item)
+
+                # Update path to show we're in the dated folder
+                self._current_folder_path = f"{member_name}/{latest_folder['name']}"
+                self._tree_label.text = f"📁 {self._current_folder_path}/ (ngày mới nhất)"
+
+            else:
+                # No date folders found, show member folder directly
+                self._current_folder_path = member_name
+                self._tree_label.text = f"📁 {member_name}/"
+
+            # Store found zip files for selection
+            self._member_zip_files = zip_files
+            self._current_folder_items = items  # Keep original items for navigation
+
+            # Build table data
+            if zip_files:
+                table_data = []
+                for zf in zip_files:
+                    name = zf.get("name", "Unknown")
+                    updated = zf.get("lastUpdated", "-")
+                    if updated and updated != "-":
+                        try:
+                            updated = updated[:10]
+                        except Exception:
+                            pass
+                    table_data.append(("📦", name, updated))
+                self._folder_tree_table.data = table_data
+            else:
+                self._folder_tree_table.data = [("📭", "(Không tìm thấy file ZIP)", "-")]
+
+        except Exception as e:
+            self._folder_tree_table.data = [("❌", f"Lỗi: {e}", "-")]
+            self._tree_label.text = f"📁 {member_name}/ (Lỗi)"
+
+    def _on_folder_item_activate(self, widget, row):
+        """Handle double-click/activate on folder item - navigate into folder or select ZIP."""
+        # Guard against empty row (clicked on empty area)
+        if not row:
+            return
+        if not hasattr(self, '_current_folder_items'):
+            return
+
+        # Get item name from row
+        try:
+            item_name = row.ten if hasattr(row, 'ten') else row[1]
+        except (IndexError, TypeError, AttributeError):
+            return
+
+        # Find item in current items
+        for item in self._current_folder_items:
+            if item.get("name") == item_name:
+                if item.get("type") == "folder":
+                    # Push current folder to stack for back navigation
+                    if hasattr(self, '_current_folder_id'):
+                        self._folder_nav_stack.append({
+                            "id": self._current_folder_id,
+                            "path": self._current_folder_path
+                        })
+
+                    # Navigate into folder
+                    self._current_folder_id = item["id"]
+                    self._current_folder_path = f"{self._current_folder_path}/{item['name']}"
+                    self._tree_label.text = f"📁 {self._current_folder_path}"
+                    asyncio.create_task(self._load_folder_tree(item["id"]))
+
+                elif item.get("name", "").lower().endswith('.zip'):
+                    # ZIP file selected - add to selected list
+                    if not hasattr(self, '_selected_zip_files'):
+                        self._selected_zip_files = []
+
+                    # Add ZIP info with member context
+                    zip_info = {
+                        "id": item.get("id"),
+                        "name": item.get("name"),
+                        "path": self._current_folder_path,
+                        "member_name": getattr(self, '_selected_member_name', 'Unknown'),
+                        "member_id": getattr(self, '_selected_member_id', None),
+                    }
+
+                    # Check if already selected
+                    already_selected = any(
+                        z["id"] == zip_info["id"] for z in self._selected_zip_files
+                    )
+
+                    if not already_selected:
+                        self._selected_zip_files.append(zip_info)
+                        self._team_report_status.text = f"✅ Đã chọn: {item.get('name')} ({len(self._selected_zip_files)} file)"
+                        self.log(f"📦 Selected ZIP: {zip_info['member_name']}/{zip_info['path']}/{item.get('name')}")
+                    else:
+                        # Remove from selection
+                        self._selected_zip_files = [
+                            z for z in self._selected_zip_files if z["id"] != zip_info["id"]
+                        ]
+                        self._team_report_status.text = f"❌ Bỏ chọn: {item.get('name')} ({len(self._selected_zip_files)} file)"
+
+                break
+
+    def _tree_go_back(self, widget):
+        """Go back to parent folder in tree view."""
+        if not self._folder_nav_stack:
+            # If stack is empty, go back to member root
+            if hasattr(self, '_selected_member_id'):
+                self._folder_nav_stack = []
+                asyncio.create_task(self._load_folder_tree(self._selected_member_id))
+            return
+
+        # Pop from stack and navigate
+        prev = self._folder_nav_stack.pop()
+        self._current_folder_id = prev["id"]
+        self._current_folder_path = prev["path"]
+        self._tree_label.text = f"📁 {self._current_folder_path}"
+        asyncio.create_task(self._load_folder_tree(prev["id"]))
+
+    async def _find_member_zip_files(self, member_id, member_name):
+        """Find ZIP files in a member's folder (checking dated subfolders)."""
+        import re
+        from datetime import datetime
+
+        zip_files = []
+
+        try:
+            # Fetch member folder contents
+            result = await asyncio.to_thread(fetch_folder_contents, member_id)
+
+            if not result.get("success"):
+                return zip_files
+
+            data = result.get("data", {})
+            items = data.get("items", [])
+
+            # Date patterns for folder names
+            date_patterns = [
+                (r'^(\d{4})-(\d{2})-(\d{2})$', '%Y-%m-%d'),
+                (r'^(\d{2})-(\d{2})-(\d{4})$', '%d-%m-%Y'),
+                (r'^(\d{4})_(\d{2})_(\d{2})$', '%Y_%m_%d'),
+                (r'^(\d{2})_(\d{2})_(\d{4})$', '%d_%m_%Y'),
+            ]
+
+            date_folders = []
+
+            for item in items:
+                name = item.get("name", "")
+                item_type = item.get("type", "")
+
+                if item_type == "folder":
+                    # Check if folder name matches a date pattern
+                    for pattern, date_fmt in date_patterns:
+                        if re.match(pattern, name):
+                            try:
+                                parsed_date = datetime.strptime(name, date_fmt)
+                                date_folders.append({
+                                    "item": item,
+                                    "date": parsed_date,
+                                    "name": name
+                                })
+                            except ValueError:
+                                pass
+                            break
+                elif name.lower().endswith('.zip'):
+                    zip_files.append(item)
+
+            # If we found date folders, use the latest one
+            if date_folders:
+                date_folders.sort(key=lambda x: x["date"], reverse=True)
+                latest_folder = date_folders[0]
+
+                # Fetch contents of latest dated folder
+                latest_result = await asyncio.to_thread(
+                    fetch_folder_contents, latest_folder["item"]["id"]
+                )
+
+                if latest_result.get("success"):
+                    latest_data = latest_result.get("data", {})
+                    latest_items = latest_data.get("items", [])
+
+                    for item in latest_items:
+                        if item.get("name", "").lower().endswith('.zip'):
+                            zip_files.append(item)
+
+        except Exception as e:
+            self.log(f"⚠️ Error finding ZIPs for {member_name}: {e}")
+
+        return zip_files
+
+    async def _download_drive_file(self, file_id):
+        """Download a file from Google Drive using Apps Script."""
+        try:
+            # Use Apps Script to get file content
+            url = f"{DRIVE_LIST_SCRIPT_URL}?action=downloadFile&fileId={file_id}"
+
+            import urllib.request
+            import urllib.error
+            import json
+
+            def do_download():
+                req = urllib.request.Request(url)
+                with urllib.request.urlopen(req, timeout=60) as response:
+                    response_data = response.read()
+                    # Check if it's JSON (error) or binary (file content)
+                    try:
+                        json_response = json.loads(response_data.decode('utf-8'))
+                        if json_response.get("success") and "data" in json_response:
+                            # Base64 encoded file data
+                            import base64
+                            return base64.b64decode(json_response["data"])
+                        return None
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        # Binary data - return as is
+                        return response_data
+
+            return await asyncio.to_thread(do_download)
+
+        except Exception as e:
+            self.log(f"❌ Download error: {e}")
+            return None
 
     def _select_all_members(self, widget):
         """Select all members."""
@@ -3041,32 +3552,114 @@ class ClaudeCodeLogApp(toga.App):
             self.log(f"Error selecting folder: {e}")
 
     def _generate_team_report(self, widget):
-        """Generate team analytics report for selected members."""
-        # Get selected members from table selection
-        selected_rows = self._member_table.selection
-        if selected_rows:
-            # Update selection based on table selection
-            selected_names = set()
-            for row in selected_rows:
-                if len(row) >= 2:
-                    selected_names.add(row[1])  # Member name is in column 1
+        """Generate team analytics report for selected ZIP files."""
+        # Check if using Google Drive mode with selected ZIP files
+        using_drive_mode = not self._team_root_path.value.strip() and hasattr(self, '_team_root_folder_id')
 
-            for m in self._team_members:
-                m["selected"] = m["name"] in selected_names
+        if using_drive_mode:
+            # Use selected ZIP files from folder tree
+            selected_zips = getattr(self, '_selected_zip_files', [])
+
+            if not selected_zips:
+                self._team_report_status.text = "❌ Vui lòng chọn ít nhất 1 file ZIP (double-click vào file ZIP)"
+                return
+
+            self._team_report_status.text = f"🔄 Đang tải {len(selected_zips)} file ZIP..."
+            self._generate_report_btn.enabled = False
+            asyncio.create_task(self._generate_team_report_from_zips(selected_zips))
         else:
-            # Use all members marked as selected
-            pass
+            # Local mode - use selected members
+            selected_rows = self._member_table.selection
+            if selected_rows:
+                selected_names = set()
+                for row in selected_rows:
+                    if len(row) >= 2:
+                        selected_names.add(row[1])
 
-        selected_members = [m for m in self._team_members if m["selected"]]
+                for m in self._team_members:
+                    m["selected"] = m["name"] in selected_names
 
-        if not selected_members:
-            self._team_report_status.text = "❌ Vui lòng chọn ít nhất 1 thành viên"
-            return
+            selected_members = [m for m in self._team_members if m["selected"]]
 
-        self._team_report_status.text = f"🔄 Đang phân tích {len(selected_members)} thành viên..."
-        self._generate_report_btn.enabled = False
+            if not selected_members:
+                self._team_report_status.text = "❌ Vui lòng chọn ít nhất 1 thành viên"
+                return
 
-        asyncio.create_task(self._generate_team_report_async(selected_members))
+            self._team_report_status.text = f"🔄 Đang phân tích {len(selected_members)} thành viên..."
+            self._generate_report_btn.enabled = False
+            asyncio.create_task(self._generate_team_report_async(selected_members))
+
+    async def _generate_team_report_from_zips(self, selected_zips):
+        """Generate team report from selected ZIP files downloaded from Google Drive."""
+        try:
+            import tempfile
+            import zipfile
+            import io
+
+            output_path_str = self._team_output_path.value.strip()
+
+            # Use output path or temp directory
+            if output_path_str:
+                download_dir = Path(output_path_str)
+            else:
+                download_dir = Path(tempfile.mkdtemp(prefix="team_report_"))
+                self.log(f"📁 Temp directory: {download_dir}")
+
+            download_dir.mkdir(parents=True, exist_ok=True)
+
+            # Group ZIPs by member
+            zips_by_member = {}
+            for zf in selected_zips:
+                member_name = zf.get("member_name", "Unknown")
+                if member_name not in zips_by_member:
+                    zips_by_member[member_name] = []
+                zips_by_member[member_name].append(zf)
+
+            # Download and extract ZIPs for each member
+            for idx, (member_name, zips) in enumerate(zips_by_member.items()):
+                self._team_report_status.text = f"📥 Tải {member_name}... ({idx+1}/{len(zips_by_member)})"
+
+                member_dir = download_dir / member_name
+                member_dir.mkdir(parents=True, exist_ok=True)
+
+                for zf in zips:
+                    try:
+                        zip_name = zf.get("name")
+                        zip_id = zf.get("id")
+
+                        if zip_id:
+                            self.log(f"  📦 Downloading: {zip_name}")
+                            zip_data = await self._download_drive_file(zip_id)
+
+                            if zip_data:
+                                try:
+                                    with zipfile.ZipFile(io.BytesIO(zip_data)) as zf_obj:
+                                        zf_obj.extractall(member_dir)
+                                    self.log(f"  ✅ Extracted: {zip_name}")
+                                except zipfile.BadZipFile:
+                                    self.log(f"  ⚠️ Invalid ZIP: {zip_name}")
+                    except Exception as e:
+                        self.log(f"  ❌ Error: {e}")
+
+            # Now analyze the downloaded data
+            self._team_report_status.text = "📊 Đang phân tích dữ liệu..."
+
+            # Create member list for analysis
+            members_for_analysis = [
+                {"name": name, "selected": True}
+                for name in zips_by_member.keys()
+            ]
+
+            # Set root path for TeamAnalyticsManager
+            self._team_root_path.value = str(download_dir)
+
+            # Call the regular analysis function
+            await self._generate_team_report_async(members_for_analysis)
+
+        except Exception as e:
+            self._team_report_status.text = f"❌ Error: {e}"
+            self.log(f"❌ Error generating report from ZIPs: {e}")
+            self._generate_report_btn.enabled = True
 
     async def _generate_team_report_async(self, selected_members):
         """Generate team report asynchronously."""
@@ -3077,11 +3670,73 @@ class ClaudeCodeLogApp(toga.App):
                 MemberStats,
                 TeamAnalytics,
             )
+            import tempfile
+            import zipfile
+            import io
 
             root_path_str = self._team_root_path.value.strip()
             output_path_str = self._team_output_path.value.strip()
 
-            root_path = Path(root_path_str)
+            # Check if using Google Drive mode (no local root path)
+            using_drive_mode = not root_path_str and hasattr(self, '_team_root_folder_id')
+
+            if using_drive_mode:
+                # Need to download ZIP files from Google Drive
+                self.log("📥 Chế độ Google Drive: đang tải ZIP files...")
+
+                # Use output path or temp directory
+                if output_path_str:
+                    download_dir = Path(output_path_str)
+                else:
+                    download_dir = Path(tempfile.mkdtemp(prefix="team_report_"))
+                    self.log(f"📁 Temp directory: {download_dir}")
+
+                download_dir.mkdir(parents=True, exist_ok=True)
+
+                # Download and extract ZIP files for each member
+                for idx, member_info in enumerate(selected_members):
+                    member_name = member_info["name"]
+                    member_id = member_info.get("id")
+
+                    if not member_id:
+                        continue
+
+                    self._team_report_status.text = f"📥 Tải dữ liệu {member_name}... ({idx+1}/{len(selected_members)})"
+
+                    # Create member directory
+                    member_dir = download_dir / member_name
+                    member_dir.mkdir(parents=True, exist_ok=True)
+
+                    # Find and download ZIP files using _member_zip_files if available
+                    # or search the member's folder
+                    zip_files = await self._find_member_zip_files(member_id, member_name)
+
+                    for zf in zip_files:
+                        try:
+                            zip_url = zf.get("url")
+                            zip_name = zf.get("name")
+                            zip_id = zf.get("id")
+
+                            if zip_id:
+                                self.log(f"  📦 Downloading: {zip_name}")
+                                # Download ZIP file content
+                                zip_data = await self._download_drive_file(zip_id)
+
+                                if zip_data:
+                                    # Extract ZIP
+                                    try:
+                                        with zipfile.ZipFile(io.BytesIO(zip_data)) as zf_obj:
+                                            zf_obj.extractall(member_dir)
+                                        self.log(f"  ✅ Extracted: {zip_name}")
+                                    except zipfile.BadZipFile:
+                                        self.log(f"  ⚠️ Invalid ZIP: {zip_name}")
+                        except Exception as e:
+                            self.log(f"  ❌ Error downloading {zf.get('name')}: {e}")
+
+                # Use downloaded directory as root path
+                root_path = download_dir
+            else:
+                root_path = Path(root_path_str)
 
             # Determine output directory
             if output_path_str:
@@ -3107,7 +3762,6 @@ class ClaudeCodeLogApp(toga.App):
             latest_ts = None
 
             for idx, member_info in enumerate(selected_members):
-                member_path = member_info["path"]
                 member_name = member_info["name"]
 
                 self._team_report_status.text = f"🔄 Phân tích {member_name}... ({idx+1}/{len(selected_members)})"

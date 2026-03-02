@@ -1,0 +1,28 @@
+{
+  "name": "claude-reporter-setup",
+  "version": "2.0.0",
+  "description": "Interactive setup tool for Claude Reporter — installs hooks and registers your UUID",
+  "bin": {
+    "claude-reporter-setup": "bin/setup.js"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "anthropic",
+    "hooks",
+    "reporter",
+    "monitoring"
+  ],
+  "author": "Nhan Nguyen",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nhannguyenhuu241/claude-reporter.git"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "files": [
+    "bin"
+  ]
+}

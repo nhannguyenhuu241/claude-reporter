@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0f0f11;
+  --surface: #18181b;
+  --border: #27272a;
+  --text: #e4e4e7;
+  --text-muted: #71717a;
+  --accent: #6366f1;
+  --accent-muted: #312e81;
+  --green: #22c55e;
+  --yellow: #eab308;
+  --red: #ef4444;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-active { background: #14532d; color: var(--green); }
+.badge-completed { background: #1c1917; color: var(--text-muted); }
+.badge-error { background: #450a0a; color: var(--red); }
