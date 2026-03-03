@@ -9,12 +9,12 @@ export async function GET(
 
   const user = await prisma.user.findUnique({
     where: { id: uuid },
-    select: { id: true, email: true, createdAt: true },
+    select: { id: true, email: true, createdAt: true, department: { select: { id: true, name: true } } },
   });
 
   if (!user) {
     return NextResponse.json({ valid: false }, { status: 404 });
   }
 
-  return NextResponse.json({ valid: true, email: user.email, createdAt: user.createdAt });
+  return NextResponse.json({ valid: true, email: user.email, createdAt: user.createdAt, department: user.department });
 }

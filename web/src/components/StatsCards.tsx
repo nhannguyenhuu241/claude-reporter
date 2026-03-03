@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+
 interface Stats {
   totalSessions: number;
   activeSessions: number;
@@ -20,7 +22,29 @@ function fmt(n: number) {
   return n.toString();
 }
 
-export function StatsCards({ stats }: { stats: Stats }) {
+const EMPTY: Stats = {
+  totalSessions: 0,
+  activeSessions: 0,
+  totalTokens: 0,
+  estimatedCostUsd: 0,
+  recentActivity24h: 0,
+  tokenBreakdown: { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 },
+};
+
+export function StatsCards() {
+  const [stats, setStats] = useState<Stats>(EMPTY);
+  const [isPersonal, setIsPersonal] = useState(false);
+
+  useEffect(() => {
+    const uuid = localStorage.getItem("claude-reporter-uuid");
+    const url = uuid ? `/api/stats?userId=${uuid}` : "/api/stats";
+    setIsPersonal(!!uuid);
+    fetch(url)
+      .then((r) => r.json())
+      .then((d) => setStats(d))
+      .catch(() => {});
+  }, []);
+
   const cards = [
     {
       label: "Total Sessions",
@@ -49,27 +73,33 @@ export function StatsCards({ stats }: { stats: Stats }) {
   ];
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-        gap: "1rem",
-        marginBottom: "1.5rem",
-      }}
-    >
-      {cards.map((c) => (
-        <div key={c.label} className="card">
-          <div style={{ color: "var(--text-muted)", fontSize: "0.75rem", marginBottom: 4 }}>
-            {c.label}
+    <div style={{ marginBottom: "1.5rem" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.5rem" }}>
+        <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
+          {isPersonal ? "Thống kê của bạn" : "Thống kê toàn hệ thống"}
+        </span>
+      </div>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: "1rem",
+        }}
+      >
+        {cards.map((c) => (
+          <div key={c.label} className="card">
+            <div style={{ color: "var(--text-muted)", fontSize: "0.75rem", marginBottom: 4 }}>
+              {c.label}
+            </div>
+            <div style={{ color: c.color, fontSize: "1.8rem", fontWeight: 700, lineHeight: 1 }}>
+              {c.value}
+            </div>
+            <div style={{ color: "var(--text-muted)", fontSize: "0.7rem", marginTop: 4 }}>
+              {c.sub}
+            </div>
           </div>
-          <div style={{ color: c.color, fontSize: "1.8rem", fontWeight: 700, lineHeight: 1 }}>
-            {c.value}
-          </div>
-          <div style={{ color: "var(--text-muted)", fontSize: "0.7rem", marginTop: 4 }}>
-            {c.sub}
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }

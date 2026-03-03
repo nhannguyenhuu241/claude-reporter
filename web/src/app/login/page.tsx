@@ -1,30 +1,51 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import Link from "next/link";
 
 type State = "idle" | "loading" | "done" | "error";
+
+interface Department {
+  id: string;
+  name: string;
+}
 
 interface RegisterResult {
   uuid: string;
   email: string;
   isNew: boolean;
+  department: { id: string; name: string } | null;
 }
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
+  const [departmentId, setDepartmentId] = useState("");
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [deptsLoading, setDeptsLoading] = useState(true);
   const [state, setState] = useState<State>("idle");
   const [result, setResult] = useState<RegisterResult | null>(null);
   const [copied, setCopied] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
 
+  useEffect(() => {
+    fetch("/api/departments")
+      .then((r) => r.json())
+      .then((d) => setDepartments(d.departments ?? []))
+      .catch(() => {})
+      .finally(() => setDeptsLoading(false));
+  }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setState("loading");
     try {
+      const body: { email: string; departmentId?: string } = { email };
+      if (departmentId) body.departmentId = departmentId;
+
       const res = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -34,7 +55,6 @@ export default function LoginPage() {
       }
       setResult(data);
       setState("done");
-      // Persist UUID in localStorage for "Mine" filter on dashboard
       localStorage.setItem("claude-reporter-uuid", data.uuid);
     } catch {
       setErrorMsg("Network error — is the server running?");
@@ -57,16 +77,15 @@ export default function LoginPage() {
     <div style={{ maxWidth: 560, margin: "4rem auto" }}>
       <div className="card">
         <h1 style={{ fontSize: "1.2rem", fontWeight: 700, marginBottom: "0.25rem" }}>
-          Đăng ký máy của bạn
+          Đăng ký / Lấy UUID
         </h1>
         <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: "1.5rem" }}>
-          Nhập email để nhận UUID định danh. UUID này gắn với tất cả
-          Claude sessions chạy trên máy bạn.
+          Nhập email để tạo hoặc lấy lại UUID. Nếu email đã đăng ký, UUID cũ sẽ được trả về.
         </p>
 
         {state !== "done" && (
           <form onSubmit={handleSubmit}>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
               <input
                 type="email"
                 value={email}
@@ -75,7 +94,6 @@ export default function LoginPage() {
                 required
                 disabled={state === "loading"}
                 style={{
-                  flex: 1,
                   background: "var(--bg)",
                   border: "1px solid var(--border)",
                   borderRadius: 6,
@@ -85,6 +103,54 @@ export default function LoginPage() {
                   outline: "none",
                 }}
               />
+
+              <div>
+                <label
+                  htmlFor="dept-select"
+                  style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: 4 }}
+                >
+                  Phòng ban
+                </label>
+                {deptsLoading ? (
+                  <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", padding: "0.4rem 0" }}>
+                    Đang tải…
+                  </div>
+                ) : departments.length === 0 ? (
+                  <div style={{
+                    fontSize: "0.78rem", color: "var(--text-muted)",
+                    background: "var(--bg)", border: "1px solid var(--border)",
+                    borderRadius: 6, padding: "0.45rem 0.75rem",
+                  }}>
+                    Chưa có phòng ban nào — liên hệ admin để thiết lập
+                  </div>
+                ) : (
+                  <select
+                    id="dept-select"
+                    value={departmentId}
+                    onChange={(e) => setDepartmentId(e.target.value)}
+                    disabled={state === "loading"}
+                    style={{
+                      width: "100%",
+                      background: "var(--bg)",
+                      border: "1px solid var(--border)",
+                      borderRadius: 6,
+                      padding: "0.5rem 0.75rem",
+                      color: departmentId ? "var(--text)" : "var(--text-muted)",
+                      fontSize: "0.88rem",
+                      outline: "none",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <option value="">-- Chọn phòng ban --</option>
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
               <button
                 type="submit"
                 disabled={state === "loading"}
@@ -100,7 +166,7 @@ export default function LoginPage() {
                   opacity: state === "loading" ? 0.6 : 1,
                 }}
               >
-                {state === "loading" ? "Đang tạo…" : "Lấy UUID"}
+                {state === "loading" ? "Đang tải…" : "Lấy / Tạo UUID"}
               </button>
             </div>
             {state === "error" && (
@@ -113,14 +179,35 @@ export default function LoginPage() {
 
         {state === "done" && result && (
           <div>
-            {/* Status badge */}
-            <div style={{ marginBottom: "1rem" }}>
-              <span className={`badge ${result.isNew ? "badge-active" : "badge-completed"}`}>
-                {result.isNew ? "Tài khoản mới" : "Chào mừng trở lại"}
-              </span>
-              <span style={{ color: "var(--text-muted)", fontSize: "0.8rem", marginLeft: 8 }}>
-                {result.email}
-              </span>
+            {/* Status banner */}
+            <div
+              style={{
+                background: result.isNew ? "rgba(34,197,94,0.1)" : "rgba(99,102,241,0.1)",
+                border: `1px solid ${result.isNew ? "var(--green)" : "var(--accent)"}`,
+                borderRadius: 6,
+                padding: "0.6rem 0.85rem",
+                marginBottom: "1rem",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+              }}
+            >
+              <span style={{ fontSize: "1rem" }}>{result.isNew ? "✅" : "🔑"}</span>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>
+                  {result.isNew ? "Tài khoản mới đã tạo!" : "Tìm thấy tài khoản của bạn"}
+                </div>
+                <div style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>
+                  {result.isNew
+                    ? `Đăng ký thành công cho ${result.email}`
+                    : `Email ${result.email} đã đăng ký trước đó — đây là UUID của bạn:`}
+                  {result.department && (
+                    <span style={{ marginLeft: 6 }}>
+                      · Phòng ban: <strong style={{ color: "var(--accent)" }}>{result.department.name}</strong>
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* UUID display */}
@@ -167,88 +254,99 @@ export default function LoginPage() {
               </div>
             </div>
 
-            {/* Setup instructions */}
-            <div
-              style={{
-                background: "var(--bg)",
-                border: "1px solid var(--border)",
-                borderRadius: 6,
-                padding: "1rem",
-              }}
-            >
-              <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.75rem" }}>
-                Cài đặt trên máy bạn
-              </div>
+            {/* Onboarding steps */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem" }}>
 
-              {/* Primary: npx */}
-              <div style={{ marginBottom: "1rem" }}>
-                <div style={{ color: "var(--text-muted)", fontSize: "0.75rem", marginBottom: 4 }}>
-                  Chạy lệnh này trong terminal rồi dán UUID khi được hỏi
+              {/* Step 1 — done */}
+              <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                <div style={{
+                  width: 26, height: 26, borderRadius: "50%", background: "var(--green)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: "0.8rem", fontWeight: 700, color: "#fff", flexShrink: 0, marginTop: 2,
+                }}>✓</div>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>Đã lấy UUID</div>
+                  <div style={{ color: "var(--text-muted)", fontSize: "0.72rem", marginTop: 2, fontFamily: "monospace" }}>
+                    {result.uuid}
+                  </div>
                 </div>
-                <pre
-                  style={{
-                    background: "#000",
-                    borderRadius: 4,
-                    padding: "0.5rem 0.75rem",
-                    fontSize: "0.8rem",
-                    color: "#a3e635",
-                    margin: 0,
-                    overflowX: "auto",
-                  }}
-                >
-                  {`npx claude-reporter-setup`}
-                </pre>
               </div>
 
-              {/* Divider */}
-              <div style={{ color: "var(--text-muted)", fontSize: "0.7rem", marginBottom: "0.75rem", textAlign: "center" }}>
-                — hoặc cài thủ công —
-              </div>
-
-              {/* Manual step 1 */}
-              <div style={{ marginBottom: "0.6rem" }}>
-                <div style={{ color: "var(--text-muted)", fontSize: "0.7rem", marginBottom: 3 }}>
-                  1. Lưu UUID
+              {/* Step 2 — cài hook */}
+              <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                <div style={{
+                  width: 26, height: 26, borderRadius: "50%", background: "var(--accent)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: "0.8rem", fontWeight: 700, color: "#fff", flexShrink: 0, marginTop: 2,
+                }}>2</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: 4 }}>
+                    Cài hook trên máy
+                  </div>
+                  <div style={{ color: "var(--text-muted)", fontSize: "0.72rem", marginBottom: 6 }}>
+                    Chạy lệnh sau trong terminal — tự động cài UUID + hook:
+                  </div>
+                  <pre style={{
+                    background: "#000", borderRadius: 4, padding: "0.5rem 0.75rem",
+                    fontSize: "0.82rem", color: "#a3e635", margin: 0, overflowX: "auto",
+                  }}>
+                    {`npx claude-reporter-setup`}
+                  </pre>
+                  <details style={{ marginTop: 6 }}>
+                    <summary style={{ color: "var(--text-muted)", fontSize: "0.7rem", cursor: "pointer" }}>
+                      hoặc cài thủ công
+                    </summary>
+                    <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+                      <pre style={{
+                        background: "#111", borderRadius: 4, padding: "0.35rem 0.6rem",
+                        fontSize: "0.7rem", color: "#86efac", margin: 0, overflowX: "auto",
+                      }}>{`echo '${result.uuid}' > ~/.claude-reporter-uuid`}</pre>
+                      <pre style={{
+                        background: "#111", borderRadius: 4, padding: "0.35rem 0.6rem",
+                        fontSize: "0.7rem", color: "#86efac", margin: 0, overflowX: "auto",
+                      }}>{`curl -s ${serverUrl}/api/install | bash`}</pre>
+                    </div>
+                  </details>
                 </div>
-                <pre
-                  style={{
-                    background: "#111",
-                    borderRadius: 4,
-                    padding: "0.4rem 0.6rem",
-                    fontSize: "0.72rem",
-                    color: "#86efac",
-                    margin: 0,
-                    overflowX: "auto",
-                  }}
-                >
-                  {`echo '${result.uuid}' > ~/.claude-reporter-uuid`}
-                </pre>
               </div>
 
-              {/* Manual step 2 */}
-              <div>
-                <div style={{ color: "var(--text-muted)", fontSize: "0.7rem", marginBottom: 3 }}>
-                  2. Cài hook
+              {/* Step 3 — dùng Claude */}
+              <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start" }}>
+                <div style={{
+                  width: 26, height: 26, borderRadius: "50%", background: "var(--surface)",
+                  border: "1px solid var(--border)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: "0.8rem", fontWeight: 700, color: "var(--text-muted)", flexShrink: 0, marginTop: 2,
+                }}>3</div>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: "0.85rem" }}>Mở Claude Code và làm việc bình thường</div>
+                  <div style={{ color: "var(--text-muted)", fontSize: "0.72rem", marginTop: 2 }}>
+                    Session sẽ hiện trên dashboard trong vòng 5 phút.
+                  </div>
                 </div>
-                <pre
-                  style={{
-                    background: "#111",
-                    borderRadius: 4,
-                    padding: "0.4rem 0.6rem",
-                    fontSize: "0.72rem",
-                    color: "#86efac",
-                    margin: 0,
-                    overflowX: "auto",
-                  }}
-                >
-                  {`curl -s ${serverUrl}/api/install | bash`}
-                </pre>
               </div>
+
             </div>
 
-            <div style={{ marginTop: "1rem", textAlign: "center" }}>
+            <div style={{ marginTop: "1.25rem", display: "flex", gap: "0.75rem", justifyContent: "center", alignItems: "center" }}>
+              <Link
+                href="/"
+                style={{
+                  background: "var(--accent)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "0.5rem 1.25rem",
+                  fontWeight: 600,
+                  fontSize: "0.85rem",
+                  textDecoration: "none",
+                  cursor: "pointer",
+                }}
+              >
+                Về trang chủ →
+              </Link>
               <button
-                onClick={() => { setState("idle"); setResult(null); setEmail(""); }}
+                onClick={() => { setState("idle"); setResult(null); setEmail(""); setDepartmentId(""); }}
                 style={{
                   background: "none",
                   border: "none",

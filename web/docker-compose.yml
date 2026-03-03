@@ -1,0 +1,17 @@
+services:
+  claude-reporter:
+    build: .
+    image: claude-reporter:latest
+    container_name: claude-reporter
+    restart: always
+    ports:
+      - "3005:3005"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3005
+      - DATABASE_URL=file:/app/data/claude-reporter.db
+      - ADMIN_EMAIL=admin@gmail.com
+      - ADMIN_PASSWORD=admin123
+      # - HOOK_SECRET=your-secret-here

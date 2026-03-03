@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { UserBadge } from "@/components/UserBadge";
 import "./globals.css";
 
@@ -30,7 +31,7 @@ export default function RootLayout({
           <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
             real-time session monitor
           </span>
-          <div style={{ marginLeft: "auto" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginLeft: "auto" }}>
             <UserBadge />
           </div>
         </nav>

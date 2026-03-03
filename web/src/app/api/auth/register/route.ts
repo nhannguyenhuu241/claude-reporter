@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(req: NextRequest) {
-  let body: { email?: string };
+  let body: { email?: string; departmentId?: string };
   try {
     body = await req.json();
   } catch {
@@ -16,15 +16,21 @@ export async function POST(req: NextRequest) {
 
   const existing = await prisma.user.findUnique({ where: { email } });
 
+  const updateData = body.departmentId ? { departmentId: body.departmentId } : {};
+  const createData: { email: string; departmentId?: string } = { email };
+  if (body.departmentId) createData.departmentId = body.departmentId;
+
   const user = await prisma.user.upsert({
     where: { email },
-    create: { email },
-    update: {},
+    create: createData,
+    update: existing ? {} : updateData,
+    include: { department: { select: { id: true, name: true } } },
   });
 
   return NextResponse.json({
     uuid: user.id,
     email: user.email,
     isNew: !existing,
+    department: user.department,
   });
 }
