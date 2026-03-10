@@ -26,6 +26,13 @@ export async function GET(req: NextRequest) {
       toolName: true,
       userPrompt: true,
       assistantMessage: true,
+      session: {
+        select: {
+          projectPath: true,
+          userId: true,
+          user: { select: { email: true } },
+        },
+      },
     },
   });
 

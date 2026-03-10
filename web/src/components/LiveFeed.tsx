@@ -11,9 +11,14 @@ interface LiveEvent {
   toolName?: string;
   userPrompt?: string;
   assistantMessage?: string;
+  session?: {
+    projectPath?: string | null;
+    userId?: string | null;
+    user?: { email: string } | null;
+  };
 }
 
-// Only show these meaningful event types — hide tool_use/tool_start noise
+// Only show meaningful event types
 const VISIBLE_EVENTS = new Set(["user_prompt", "assistant_message", "session_start", "session_end"]);
 
 const EVENT_ICONS: Record<string, string> = {
@@ -37,14 +42,15 @@ const EVENT_LABELS: Record<string, string> = {
   session_end: "Session ended",
 };
 
-function truncate(s: string, n = 160) {
+function truncate(s: string, n = 200) {
   return s && s.length > n ? s.slice(0, n) + "…" : s;
 }
 
-function eventLabel(e: LiveEvent) {
-  if (e.eventType === "user_prompt") return truncate(e.userPrompt ?? "");
-  if (e.eventType === "assistant_message") return truncate(e.assistantMessage ?? "");
-  return EVENT_LABELS[e.eventType] ?? e.eventType;
+function projectName(path?: string | null) {
+  if (!path) return "Unknown Project";
+  // Extract last meaningful segment
+  const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
+  return parts[parts.length - 1] ?? path;
 }
 
 function timeLabel(ts: string) {
@@ -70,14 +76,21 @@ async function fetchEvents(params: { limit?: number; after?: number; userId?: st
   return data.events as LiveEvent[];
 }
 
+interface ProjectGroup {
+  project: string;
+  projectPath: string | null;
+  events: LiveEvent[];
+  collapsed: boolean;
+}
+
 export function LiveFeed() {
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [connected, setConnected] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [filter, setFilter] = useState<"all" | "mine">("all");
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const lastIdRef = useRef<number>(0);
   const socketRef = useRef<Socket | null>(null);
-  const listRef = useRef<HTMLDivElement>(null);
 
   const getUserId = () =>
     typeof window !== "undefined" ? localStorage.getItem("claude-reporter-uuid") ?? undefined : undefined;
@@ -87,7 +100,7 @@ export function LiveFeed() {
       const ids = new Set(prev.map((e) => e.id));
       const newOnes = incoming.filter((e) => !ids.has(e.id));
       if (newOnes.length === 0) return prev;
-      const merged = [...newOnes, ...prev].sort((a, b) => b.id - a.id).slice(0, 300);
+      const merged = [...newOnes, ...prev].sort((a, b) => b.id - a.id).slice(0, 500);
       if (merged[0]) lastIdRef.current = Math.max(lastIdRef.current, merged[0].id);
       return merged;
     });
@@ -96,7 +109,7 @@ export function LiveFeed() {
   // Initial hydration from DB
   useEffect(() => {
     const userId = filter === "mine" ? getUserId() : undefined;
-    fetchEvents({ limit: 100, userId }).then((evts) => {
+    fetchEvents({ limit: 150, userId }).then((evts) => {
       setEvents(evts);
       if (evts.length > 0) lastIdRef.current = evts[0].id;
     });
@@ -110,8 +123,6 @@ export function LiveFeed() {
     socket.on("connect", async () => {
       setConnected(true);
       setReconnecting(false);
-
-      // Catch up events missed while offline
       if (lastIdRef.current > 0) {
         const userId = filter === "mine" ? getUserId() : undefined;
         const missed = await fetchEvents({ after: lastIdRef.current, userId });
@@ -125,11 +136,6 @@ export function LiveFeed() {
     });
 
     socket.on("event", ({ event }: { event: LiveEvent }) => {
-      const userId = filter === "mine" ? getUserId() : undefined;
-      if (userId && event.sessionId) {
-        // We don't have userId on the event directly, just add it regardless
-        // The userId filter only applies to initial load; realtime shows all then filters
-      }
       mergeEvents([event]);
     });
 
@@ -139,19 +145,31 @@ export function LiveFeed() {
     };
   }, [filter, mergeEvents]);
 
-  const filteredEvents = events.filter((e) => VISIBLE_EVENTS.has(e.eventType));
+  // Group visible events by project
+  const visibleEvents = events.filter((e) => VISIBLE_EVENTS.has(e.eventType));
+
+  const groups: ProjectGroup[] = [];
+  const projectMap = new Map<string, ProjectGroup>();
+
+  for (const e of visibleEvents) {
+    const path = e.session?.projectPath ?? null;
+    const key = path ?? "__unknown__";
+    if (!projectMap.has(key)) {
+      const g: ProjectGroup = { project: projectName(path), projectPath: path, events: [], collapsed: false };
+      projectMap.set(key, g);
+      groups.push(g);
+    }
+    projectMap.get(key)!.events.push(e);
+  }
+
+  const toggleCollapse = (key: string) => {
+    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   return (
-    <div className="card" style={{ height: 520, display: "flex", flexDirection: "column" }}>
+    <div className="card" style={{ display: "flex", flexDirection: "column" }}>
       {/* Header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: "0.5rem",
-        }}
-      >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
         <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>Live Activity</span>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           {/* Filter */}
@@ -161,9 +179,7 @@ export function LiveFeed() {
                 key={f}
                 onClick={() => setFilter(f)}
                 style={{
-                  fontSize: "0.68rem",
-                  padding: "2px 8px",
-                  borderRadius: 4,
+                  fontSize: "0.68rem", padding: "2px 8px", borderRadius: 4,
                   border: "1px solid var(--border)",
                   background: filter === f ? "var(--accent)" : "transparent",
                   color: filter === f ? "#fff" : "var(--text-muted)",
@@ -174,7 +190,6 @@ export function LiveFeed() {
               </button>
             ))}
           </div>
-
           {/* Connection status */}
           <span style={{ fontSize: "0.68rem", color: connected ? "var(--green)" : reconnecting ? "#f59e0b" : "var(--red)" }}>
             ● {connected ? "live" : reconnecting ? "reconnecting…" : "disconnected"}
@@ -182,65 +197,90 @@ export function LiveFeed() {
         </div>
       </div>
 
-      {/* Event count */}
-      {filteredEvents.length > 0 && (
-        <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", marginBottom: "0.4rem" }}>
-          {filteredEvents.length} events stored · refreshes preserved
+      {/* Project groups */}
+      {groups.length === 0 ? (
+        <div style={{ color: "var(--text-muted)", fontSize: "0.8rem", padding: "1rem 0" }}>
+          Waiting for events… Start a Claude Code session to see activity here.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          {groups.map((g) => {
+            const key = g.projectPath ?? "__unknown__";
+            const isCollapsed = collapsed[key] ?? false;
+            return (
+              <div key={key} style={{ borderRadius: 8, border: "1px solid var(--border)", overflow: "hidden" }}>
+                {/* Project header */}
+                <button
+                  onClick={() => toggleCollapse(key)}
+                  style={{
+                    width: "100%", textAlign: "left", background: "rgba(255,255,255,0.03)",
+                    border: "none", borderBottom: isCollapsed ? "none" : "1px solid var(--border)",
+                    padding: "6px 10px", cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: "0.5rem",
+                  }}
+                >
+                  <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{isCollapsed ? "▶" : "▼"}</span>
+                  <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--accent)" }}>
+                    📁 {g.project}
+                  </span>
+                  {g.projectPath && (
+                    <span style={{ fontSize: "0.63rem", color: "var(--text-muted)", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {g.projectPath}
+                    </span>
+                  )}
+                  <span style={{ marginLeft: "auto", fontSize: "0.65rem", color: "var(--text-muted)", flexShrink: 0 }}>
+                    {g.events.length} events
+                  </span>
+                </button>
+
+                {/* Events in this project */}
+                {!isCollapsed && (
+                  <div style={{ maxHeight: 380, overflowY: "auto", padding: "6px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+                    {g.events.map((e) => (
+                      <div
+                        key={e.id}
+                        style={{
+                          padding: "6px 8px", borderRadius: 6,
+                          borderLeft: `3px solid ${EVENT_COLORS[e.eventType] ?? "var(--border)"}`,
+                          background: "rgba(255,255,255,0.02)",
+                        }}
+                      >
+                        {/* Top row */}
+                        <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: (e.eventType === "user_prompt" || e.eventType === "assistant_message") ? 4 : 0 }}>
+                          <span style={{ fontSize: "0.72rem" }}>{EVENT_ICONS[e.eventType] ?? "•"}</span>
+                          <span style={{ fontSize: "0.67rem", fontWeight: 600, color: EVENT_COLORS[e.eventType] ?? "var(--text-muted)" }}>
+                            {EVENT_LABELS[e.eventType] ?? e.eventType}
+                          </span>
+                          {e.session?.user?.email && (
+                            <span style={{ fontSize: "0.63rem", color: "var(--text-muted)" }}>
+                              {e.session.user.email.split("@")[0]}
+                            </span>
+                          )}
+                          <span style={{ marginLeft: "auto", fontSize: "0.62rem", color: "var(--text-muted)", flexShrink: 0 }}>
+                            {timeLabel(e.timestamp)}
+                          </span>
+                        </div>
+                        {/* Content */}
+                        {(e.eventType === "user_prompt" || e.eventType === "assistant_message") && (
+                          <div style={{
+                            fontSize: "0.76rem",
+                            color: e.eventType === "user_prompt" ? "var(--text)" : "var(--text-muted)",
+                            lineHeight: 1.5,
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-word",
+                          }}>
+                            {truncate(e.eventType === "user_prompt" ? (e.userPrompt ?? "") : (e.assistantMessage ?? ""))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
-
-      {/* Event list */}
-      <div
-        ref={listRef}
-        style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: 2 }}
-      >
-        {filteredEvents.length === 0 ? (
-          <div style={{ color: "var(--text-muted)", fontSize: "0.8rem", padding: "1rem 0" }}>
-            Waiting for events… Start a Claude Code session to see activity here.
-          </div>
-        ) : (
-          filteredEvents.map((e) => (
-            <div
-              key={e.id}
-              style={{
-                padding: "6px 8px",
-                borderRadius: 6,
-                borderLeft: `3px solid ${EVENT_COLORS[e.eventType] ?? "var(--border)"}`,
-                background: "rgba(255,255,255,0.02)",
-                marginBottom: 3,
-              }}
-            >
-              {/* Top row: icon + type label + session + time */}
-              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: e.eventType === "user_prompt" || e.eventType === "assistant_message" ? 4 : 0 }}>
-                <span style={{ fontSize: "0.75rem" }}>
-                  {EVENT_ICONS[e.eventType] ?? "•"}
-                </span>
-                <span style={{ fontSize: "0.68rem", fontWeight: 600, color: EVENT_COLORS[e.eventType] ?? "var(--text-muted)" }}>
-                  {EVENT_LABELS[e.eventType] ?? e.eventType}
-                </span>
-                <span style={{ fontSize: "0.63rem", color: "var(--accent)", fontFamily: "monospace" }}>
-                  #{e.sessionId.slice(0, 8)}
-                </span>
-                <span style={{ marginLeft: "auto", fontSize: "0.63rem", color: "var(--text-muted)", flexShrink: 0 }}>
-                  {timeLabel(e.timestamp)}
-                </span>
-              </div>
-              {/* Content row: only for prompt/message */}
-              {(e.eventType === "user_prompt" || e.eventType === "assistant_message") && (
-                <div style={{
-                  fontSize: "0.76rem",
-                  color: e.eventType === "user_prompt" ? "var(--text)" : "var(--text-muted)",
-                  lineHeight: 1.45,
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                }}>
-                  {eventLabel(e)}
-                </div>
-              )}
-            </div>
-          ))
-        )}
-      </div>
     </div>
   );
 }
