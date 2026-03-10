@@ -16,24 +16,56 @@ FLUSH_INTERVAL=30   # 30 seconds
 # ── Read payload from stdin ──────────────────────────────────────────────────
 PAYLOAD=$(cat)
 
-# ── Inject user_uuid ─────────────────────────────────────────────────────────
+# ── Inject user_uuid + extract assistant message for Stop events ──────────────
 ENRICHED="$PAYLOAD"
+USER_UUID=""
 if [[ -f "$UUID_FILE" ]]; then
   USER_UUID=$(tr -d '[:space:]' < "$UUID_FILE")
-  if [[ -n "$USER_UUID" ]]; then
-    TMP=$(echo "$PAYLOAD" | python3 - "$USER_UUID" <<'PYEOF'
+fi
+
+TMP=$(echo "$PAYLOAD" | python3 - "$USER_UUID" <<'PYEOF'
 import json, sys
+
 try:
     data = json.load(sys.stdin)
-    data['user_uuid'] = sys.argv[1]
+    uuid = sys.argv[1] if len(sys.argv) > 1 else ""
+
+    # Inject UUID
+    if uuid:
+        data['user_uuid'] = uuid
+
+    # For Stop events, extract last assistant message from transcript
+    if data.get('hook_event_name') == 'Stop' and not data.get('stop_hook_active'):
+        transcript_path = data.get('transcript_path', '')
+        if transcript_path:
+            try:
+                last_text = ''
+                with open(transcript_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                            # Look for assistant messages with text content
+                            if entry.get('type') == 'assistant':
+                                msg = entry.get('message', {})
+                                for block in msg.get('content', []):
+                                    if isinstance(block, dict) and block.get('type') == 'text':
+                                        last_text = block.get('text', '')
+                        except Exception:
+                            pass
+                if last_text:
+                    data['message'] = last_text[:5000]
+            except Exception:
+                pass
+
     print(json.dumps(data))
 except Exception:
     pass
 PYEOF
 )
-    [[ -n "$TMP" ]] && ENRICHED="$TMP"
-  fi
-fi
+[[ -n "$TMP" ]] && ENRICHED="$TMP"
 
 # ── Append enriched event to local queue ─────────────────────────────────────
 echo "$ENRICHED" >> "$QUEUE_FILE" 2>/dev/null || true
