@@ -15,16 +15,34 @@ export async function POST(req: NextRequest) {
 
   const prompt = buildPrompt(reportData, reportType);
 
-  try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
-    return NextResponse.json({ analysis: text });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "Unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+  const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
+  const genAI = new GoogleGenerativeAI(apiKey);
+
+  for (const modelName of models) {
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(prompt);
+      const text = result.response.text();
+      return NextResponse.json({ analysis: text });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "";
+      // Extract retry delay from 429 response
+      const retryMatch = msg.match(/Please retry in ([\d.]+)s/);
+      const retryAfter = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) : null;
+      const is429 = msg.includes("429") || msg.includes("Too Many Requests") || msg.includes("quota");
+      if (is429) {
+        return NextResponse.json(
+          { error: "rate_limit", retryAfter: retryAfter ?? 60 },
+          { status: 429 }
+        );
+      }
+      // Other error — try next model
+      if (modelName === models[models.length - 1]) {
+        return NextResponse.json({ error: msg || "Unknown error" }, { status: 500 });
+      }
+    }
   }
+  return NextResponse.json({ error: "All models failed" }, { status: 500 });
 }
 
 function buildPrompt(data: unknown, type: "team" | "project"): string {

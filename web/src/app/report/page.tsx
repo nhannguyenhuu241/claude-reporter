@@ -389,22 +389,44 @@ function MemberCard({ member, rank, maxTokens, maxPrompts }: {
 // ─── Gemini AI Analysis Panel ─────────────────────────────────────────────────
 
 function GeminiAnalysis({ reportData, reportType }: { reportData: unknown; reportType: "team" | "project" }) {
-  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error" | "rate_limit">("idle");
   const [analysis, setAnalysis] = useState("");
+  const [countdown, setCountdown] = useState(0);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  async function analyze() {
+    setStatus("loading"); setAnalysis("");
+    try {
+      const res = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reportData, reportType }),
+      });
+      const data = await res.json();
+      if (res.status === 429 || data.error === "rate_limit") {
+        const secs = data.retryAfter ?? 60;
+        setCountdown(secs);
+        setStatus("rate_limit");
+        countdownRef.current = setInterval(() => {
+          setCountdown((c) => {
+            if (c <= 1) {
+              clearInterval(countdownRef.current!);
+              analyze();
+              return 0;
+            }
+            return c - 1;
+          });
+        }, 1000);
+        return;
+      }
+      if (data.error) { setStatus("error"); setAnalysis(data.error); return; }
+      setAnalysis(data.analysis); setStatus("done");
+    } catch { setStatus("error"); }
+  }
 
   useEffect(() => {
-    setStatus("loading"); setAnalysis("");
-    fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ reportData, reportType }),
-    })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) { setStatus("error"); setAnalysis(data.error); return; }
-        setAnalysis(data.analysis); setStatus("done");
-      })
-      .catch(() => setStatus("error"));
+    analyze();
+    return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
   }, []);
 
   function renderMarkdown(text: string) {
@@ -459,9 +481,26 @@ function GeminiAnalysis({ reportData, reportType }: { reportData: unknown; repor
         </div>
       )}
 
+      {status === "rate_limit" && (
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", fontSize: "0.82rem", color: "#f59e0b" }}>
+          <span>⏳ Gemini rate limit — tự retry sau</span>
+          <span style={{
+            fontWeight: 700, fontSize: "1rem", color: "#f59e0b",
+            background: "rgba(245,158,11,0.1)", borderRadius: 6, padding: "2px 10px",
+          }}>{countdown}s</span>
+        </div>
+      )}
+
       {status === "error" && (
-        <div style={{ color: "var(--red)", fontSize: "0.82rem" }}>
-          ❌ {analysis || "Lỗi kết nối Gemini. Kiểm tra GEMINI_API_KEY."}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <span style={{ color: "var(--red)", fontSize: "0.82rem" }}>
+            ❌ {analysis || "Lỗi kết nối Gemini."}
+          </span>
+          <button onClick={analyze} style={{
+            fontSize: "0.72rem", padding: "2px 10px", borderRadius: 5,
+            border: "1px solid var(--border)", background: "var(--surface)",
+            color: "var(--text-muted)", cursor: "pointer",
+          }}>Thử lại</button>
         </div>
       )}
 
