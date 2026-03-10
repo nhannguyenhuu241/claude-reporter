@@ -12,14 +12,14 @@ export async function PATCH(
 
   const { id } = await params;
 
-  let body: { departmentId?: string | null; email?: string };
+  let body: { departmentId?: string | null; email?: string; role?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const data: { departmentId?: string | null; email?: string } = {};
+  const data: { departmentId?: string | null; email?: string; role?: string } = {};
 
   if ("departmentId" in body) {
     data.departmentId = body.departmentId ?? null;
@@ -33,6 +33,13 @@ export async function PATCH(
     data.email = trimmed;
   }
 
+  if (body.role) {
+    if (!["member", "dept_head"].includes(body.role)) {
+      return NextResponse.json({ error: "Invalid role" }, { status: 400 });
+    }
+    data.role = body.role;
+  }
+
   if (Object.keys(data).length === 0) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
@@ -44,7 +51,11 @@ export async function PATCH(
       include: { department: { select: { id: true, name: true } } },
     });
     return NextResponse.json({ user });
-  } catch {
-    return NextResponse.json({ error: "User not found or email conflict" }, { status: 404 });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("Unique constraint") || msg.includes("unique")) {
+      return NextResponse.json({ error: "Email already in use" }, { status: 409 });
+    }
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 }

@@ -7,7 +7,7 @@
 # Install: placed at ~/.claude/hooks/claude-reporter.sh by install.sh
 # Never exits non-zero — must not block Claude Code.
 
-SERVER_URL="${CLAUDE_REPORTER_URL:-https://vibe-mcp.onebot.meobeo.ai}"
+SERVER_URL="${CLAUDE_REPORTER_URL:-https://vibe-reporter.onebot-training.meobeo.ai}"
 UUID_FILE="$HOME/.claude-reporter-uuid"
 QUEUE_FILE="$HOME/.claude-reporter-queue.jsonl"
 FLUSH_TS_FILE="$HOME/.claude-reporter-lastflush"

@@ -22,6 +22,8 @@ model User {
   email        String      @unique
   createdAt    DateTime    @default(now()) @map("created_at")
 
+  role         String      @default("member") // member | dept_head
+
   departmentId String?     @map("department_id")
   department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
 

@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { prisma } from "@/lib/prisma";
 
 interface Event {
   id: number;
@@ -32,10 +33,24 @@ interface Session {
 
 async function getSession(id: string): Promise<Session | null> {
   try {
-    const base = process.env.NEXT_PUBLIC_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3456}`;
-    const res = await fetch(`${base}/api/sessions/${id}`, { cache: "no-store" });
-    if (!res.ok) return null;
-    return res.json();
+    const row = await prisma.session.findUnique({
+      where: { id },
+      include: {
+        events: {
+          orderBy: { timestamp: "asc" },
+        },
+      },
+    });
+    if (!row) return null;
+    return {
+      ...row,
+      startedAt: row.startedAt.toISOString(),
+      endedAt: row.endedAt?.toISOString() ?? null,
+      events: row.events.map((e) => ({
+        ...e,
+        timestamp: e.timestamp.toISOString(),
+      })),
+    } as Session;
   } catch {
     return null;
   }

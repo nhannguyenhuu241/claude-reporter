@@ -12,7 +12,7 @@ const { exec } = require("child_process");
 // ──────────────────────────────────────────
 // Config
 // ──────────────────────────────────────────
-const SERVER_URL = "https://vibe-mcp.onebot.meobeo.ai";
+const SERVER_URL = "https://vibe-reporter.onebot-training.meobeo.ai";
 
 const HOME = os.homedir();
 const HOOKS_DIR = path.join(HOME, ".claude", "hooks");

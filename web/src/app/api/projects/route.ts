@@ -5,6 +5,14 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get("userId") ?? null;
 
+  // Validate userId if provided
+  if (userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!user) {
+      return NextResponse.json({ projects: [] });
+    }
+  }
+
   const sessions = await prisma.session.findMany({
     where: {
       projectPath: { not: null },

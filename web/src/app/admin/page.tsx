@@ -8,6 +8,7 @@ interface AdminUser {
   id: string;
   email: string;
   createdAt: string;
+  role: string;
   department: { id: string; name: string } | null;
   totalSessions: number;
   activeSessions: number;
@@ -60,7 +61,6 @@ type Tab = "departments" | "users" | "projects" | "sessions";
 export default function AdminPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [token, setToken] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
   const [authError, setAuthError] = useState("");
   const [tab, setTab] = useState<Tab>("departments");
@@ -70,43 +70,49 @@ export default function AdminPage() {
   const [anonymousSessions, setAnonymousSessions] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  // Department form state
   const [newDeptName, setNewDeptName] = useState("");
   const [deptCreating, setDeptCreating] = useState(false);
   const [deptError, setDeptError] = useState("");
   const [editingDept, setEditingDept] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem("admin-token");
-    if (stored) {
-      setToken(stored);
-      loadAll(stored);
-    }
+    // Try auto-login via existing cookie
+    loadAll();
   }, []);
 
-  async function loadAll(t: string) {
+  async function loadAll() {
     setLoading(true);
-    const headers: Record<string, string> = t ? { "Authorization": `Basic ${t}` } : {};
 
-    const [usersRes, projsRes, deptsRes] = await Promise.all([
-      fetch("/api/admin/users", { headers }),
-      fetch("/api/admin/projects", { headers }),
-      fetch("/api/admin/departments", { headers }),
-    ]);
-
-    if (usersRes.status === 401) {
-      localStorage.removeItem("admin-token");
-      setAuthError("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.");
+    let usersRes: Response, projsRes: Response, deptsRes: Response;
+    try {
+      [usersRes, projsRes, deptsRes] = await Promise.all([
+        fetch("/api/admin/users"),
+        fetch("/api/admin/projects"),
+        fetch("/api/admin/departments"),
+      ]);
+    } catch {
       setLoading(false);
       return;
     }
 
-    const [ud, pd, dd] = await Promise.all([usersRes.json(), projsRes.json(), deptsRes.json()]);
-    setUsers(ud.users ?? []);
-    setProjects(pd.projects ?? []);
-    setDepartments(dd.departments ?? []);
-    setAnonymousSessions(ud.anonymousSessions ?? 0);
-    setAuthenticated(true);
+    if (usersRes.status === 401 || projsRes.status === 401 || deptsRes.status === 401) {
+      setAuthenticated(false);
+      setAuthError("");
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const [ud, pd, dd] = await Promise.all([usersRes.json(), projsRes.json(), deptsRes.json()]);
+      setUsers(ud.users ?? []);
+      setProjects(pd.projects ?? []);
+      setDepartments(dd.departments ?? []);
+      setAnonymousSessions(ud.anonymousSessions ?? 0);
+      setAuthenticated(true);
+      localStorage.setItem("_cr_admin", "1");
+    } catch {
+      setAuthError("Lỗi khi tải dữ liệu");
+    }
     setLoading(false);
   }
 
@@ -125,16 +131,14 @@ export default function AdminPage() {
       setLoading(false);
       return;
     }
-    const { token: t } = await res.json();
-    localStorage.setItem("admin-token", t);
-    setToken(t);
-    loadAll(t);
+    localStorage.setItem("_cr_admin", "1");
+    await loadAll();
   }
 
-  function logout() {
-    localStorage.removeItem("admin-token");
+  async function logout() {
+    await fetch("/api/admin/login", { method: "DELETE" });
+    localStorage.removeItem("_cr_admin");
     setAuthenticated(false);
-    setToken("");
     setEmail("");
     setPassword("");
     setUsers([]);
@@ -150,13 +154,13 @@ export default function AdminPage() {
     setDeptError("");
     const res = await fetch("/api/admin/departments", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Basic ${token}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: newDeptName.trim() }),
     });
     setDeptCreating(false);
     if (res.ok) {
       setNewDeptName("");
-      loadAll(token);
+      await loadAll();
     } else {
       const d = await res.json();
       setDeptError(d.error ?? "Lỗi khi tạo phòng ban");
@@ -166,20 +170,17 @@ export default function AdminPage() {
   async function handleRenameDept(id: string, name: string) {
     const res = await fetch(`/api/admin/departments/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", "Authorization": `Basic ${token}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     });
     setEditingDept(null);
-    if (res.ok) loadAll(token);
+    if (res.ok) await loadAll();
   }
 
   async function handleDeleteDept(id: string, name: string) {
     if (!confirm(`Xóa phòng ban "${name}"? Users sẽ không còn thuộc phòng ban này.`)) return;
-    const res = await fetch(`/api/admin/departments/${id}`, {
-      method: "DELETE",
-      headers: { "Authorization": `Basic ${token}` },
-    });
-    if (res.ok) loadAll(token);
+    const res = await fetch(`/api/admin/departments/${id}`, { method: "DELETE" });
+    if (res.ok) await loadAll();
   }
 
   const totalTokens = users.reduce((s, u) => s + u.totalTokens, 0);
@@ -188,10 +189,20 @@ export default function AdminPage() {
   async function handleAssignDept(userId: string, departmentId: string | null) {
     await fetch(`/api/admin/users/${userId}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", "Authorization": `Basic ${token}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ departmentId }),
     });
-    loadAll(token);
+    await loadAll();
+  }
+
+  async function handleToggleRole(userId: string, currentRole: string) {
+    const newRole = currentRole === "dept_head" ? "member" : "dept_head";
+    await fetch(`/api/admin/users/${userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: newRole }),
+    });
+    await loadAll();
   }
 
   async function handleReset(scope: "sessions" | "all") {
@@ -199,12 +210,12 @@ export default function AdminPage() {
     if (!confirm(`Xác nhận xóa ${label}?`)) return;
     const res = await fetch("/api/admin/reset", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Basic ${token}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ scope }),
     });
     if (res.ok) {
       alert("Đã xóa thành công. Tải lại trang.");
-      loadAll(token);
+      await loadAll();
     } else {
       alert("Lỗi khi xóa.");
     }
@@ -282,8 +293,8 @@ export default function AdminPage() {
             </button>
           </form>
           <div style={{ marginTop: "1rem", textAlign: "center" }}>
-            <Link href="/" style={{ color: "var(--text-muted)", fontSize: "0.8rem", textDecoration: "none" }}>
-              ← Trang chủ
+            <Link href="/login" style={{ color: "var(--text-muted)", fontSize: "0.8rem", textDecoration: "none" }}>
+              ← Member login
             </Link>
           </div>
         </div>
@@ -303,9 +314,6 @@ export default function AdminPage() {
           </p>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: "0.5rem", alignItems: "center" }}>
-          <Link href="/" style={{ color: "var(--text-muted)", fontSize: "0.8rem", textDecoration: "none", padding: "4px 10px" }}>
-            ← Home
-          </Link>
           <button
             onClick={() => handleReset("sessions")}
             style={{
@@ -411,7 +419,6 @@ export default function AdminPage() {
       {/* Departments tab */}
       {tab === "departments" && (
         <div>
-          {/* Create form */}
           <div className="card" style={{ marginBottom: "1rem", padding: "1rem" }}>
             <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.75rem" }}>
               Tạo phòng ban mới
@@ -457,7 +464,6 @@ export default function AdminPage() {
             )}
           </div>
 
-          {/* Departments list */}
           <div className="card">
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
@@ -564,13 +570,11 @@ export default function AdminPage() {
                 <tr style={{ color: "var(--text-muted)", borderBottom: "1px solid var(--border)" }}>
                   <th style={{ textAlign: "left", padding: "6px 8px" }}>Email</th>
                   <th style={{ textAlign: "left", padding: "6px 8px" }}>Phòng ban</th>
+                  <th style={{ textAlign: "left", padding: "6px 8px" }}>Vai trò</th>
                   <th style={{ textAlign: "right", padding: "6px 8px" }}>Sessions</th>
-                  <th style={{ textAlign: "right", padding: "6px 8px" }}>Events</th>
                   <th style={{ textAlign: "right", padding: "6px 8px" }}>Tokens</th>
                   <th style={{ textAlign: "right", padding: "6px 8px" }}>Cost</th>
-                  <th style={{ textAlign: "left", padding: "6px 8px" }}>Projects</th>
                   <th style={{ textAlign: "right", padding: "6px 8px" }}>Last active</th>
-                  <th style={{ textAlign: "left", padding: "6px 8px" }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -589,13 +593,9 @@ export default function AdminPage() {
                         style={{
                           background: "var(--bg)",
                           border: `1px solid ${u.department ? "rgba(167,139,250,0.5)" : "var(--border)"}`,
-                          borderRadius: 4,
-                          padding: "2px 6px",
-                          fontSize: "0.72rem",
+                          borderRadius: 4, padding: "2px 6px", fontSize: "0.72rem",
                           color: u.department ? "#a78bfa" : "var(--text-muted)",
-                          cursor: "pointer",
-                          outline: "none",
-                          maxWidth: 140,
+                          cursor: "pointer", outline: "none", maxWidth: 140,
                         }}
                       >
                         <option value="">— Chưa gán —</option>
@@ -604,16 +604,26 @@ export default function AdminPage() {
                         ))}
                       </select>
                     </td>
+                    <td style={{ padding: "7px 8px" }}>
+                      <button
+                        onClick={() => handleToggleRole(u.id, u.role)}
+                        title={u.role === "dept_head" ? "Bấm để đổi về member" : "Bấm để phong Trưởng phòng"}
+                        style={{
+                          background: u.role === "dept_head" ? "rgba(234,179,8,0.15)" : "var(--surface)",
+                          border: `1px solid ${u.role === "dept_head" ? "#eab308" : "var(--border)"}`,
+                          borderRadius: 4, padding: "2px 8px", fontSize: "0.7rem",
+                          color: u.role === "dept_head" ? "#eab308" : "var(--text-muted)",
+                          cursor: "pointer", whiteSpace: "nowrap",
+                        }}
+                      >
+                        {u.role === "dept_head" ? "👑 Trưởng phòng" : "Thành viên"}
+                      </button>
+                    </td>
                     <td style={{ padding: "7px 8px", textAlign: "right" }}>
                       {u.totalSessions}
                       {u.activeSessions > 0 && (
-                        <span style={{ color: "var(--green)", fontSize: "0.68rem", marginLeft: 4 }}>
-                          +{u.activeSessions}
-                        </span>
+                        <span style={{ color: "var(--green)", fontSize: "0.68rem", marginLeft: 4 }}>+{u.activeSessions}</span>
                       )}
-                    </td>
-                    <td style={{ padding: "7px 8px", textAlign: "right", color: "var(--text-muted)" }}>
-                      {fmt(u.totalEvents)}
                     </td>
                     <td style={{ padding: "7px 8px", textAlign: "right", color: "var(--yellow)" }}>
                       {fmt(u.totalTokens)}
@@ -621,44 +631,14 @@ export default function AdminPage() {
                     <td style={{ padding: "7px 8px", textAlign: "right", color: "#f97316" }}>
                       ${u.estimatedCostUsd.toFixed(2)}
                     </td>
-                    <td style={{ padding: "7px 8px", maxWidth: 160 }}>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                        {u.projects.slice(0, 3).map((p) => (
-                          <span
-                            key={p}
-                            style={{
-                              background: "var(--surface)",
-                              border: "1px solid var(--border)",
-                              borderRadius: 3,
-                              padding: "1px 5px",
-                              fontSize: "0.65rem",
-                              color: "var(--text-muted)",
-                            }}
-                          >
-                            {p}
-                          </span>
-                        ))}
-                        {u.projects.length > 3 && (
-                          <span style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>+{u.projects.length - 3}</span>
-                        )}
-                      </div>
-                    </td>
                     <td style={{ padding: "7px 8px", textAlign: "right", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
                       {relTime(u.lastActiveAt)}
-                    </td>
-                    <td style={{ padding: "7px 8px" }}>
-                      <Link
-                        href={`/report?userId=${u.id}`}
-                        style={{ color: "var(--accent)", fontSize: "0.72rem", textDecoration: "none" }}
-                      >
-                        Report
-                      </Link>
                     </td>
                   </tr>
                 ))}
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan={9} style={{ padding: "2rem", textAlign: "center" }}>
+                    <td colSpan={7} style={{ padding: "2rem", textAlign: "center" }}>
                       <div style={{ color: "var(--text-muted)", marginBottom: 6 }}>
                         Chưa có nhân viên nào đăng ký UUID.
                       </div>

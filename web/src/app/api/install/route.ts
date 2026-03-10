@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { headers } from "next/headers";
 
-export async function GET(req: NextRequest) {
-  const hdrs = await headers();
-  const host = hdrs.get("host") ?? req.headers.get("host") ?? "vibe-mcp.onebot.meobeo.ai";
-  const proto = hdrs.get("x-forwarded-proto") ?? "https";
-  const serverUrl = `${proto}://${host}`;
+export async function GET(_req: NextRequest) {
+  const serverUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://vibe-reporter.onebot-training.meobeo.ai";
 
   const script = `#!/usr/bin/env bash
 # Claude Reporter - Auto-installer

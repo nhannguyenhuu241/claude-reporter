@@ -64,6 +64,7 @@ export async function GET(req: NextRequest) {
       id: u.id,
       email: u.email,
       createdAt: u.createdAt,
+      role: u.role,
       department: u.department,
       totalSessions: u._count.sessions,
       activeSessions,

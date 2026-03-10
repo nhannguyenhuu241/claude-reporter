@@ -35,9 +35,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
   const { id } = await params;
 
-  // Unlink users before deleting
-  await prisma.user.updateMany({ where: { departmentId: id }, data: { departmentId: null } });
-  await prisma.department.delete({ where: { id } });
-
-  return NextResponse.json({ ok: true });
+  try {
+    await prisma.user.updateMany({ where: { departmentId: id }, data: { departmentId: null } });
+    await prisma.department.delete({ where: { id } });
+    return NextResponse.json({ ok: true });
+  } catch {
+    return NextResponse.json({ error: "Department not found" }, { status: 404 });
+  }
 }

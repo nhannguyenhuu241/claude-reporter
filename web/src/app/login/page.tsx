@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 type State = "idle" | "loading" | "done" | "error";
@@ -18,6 +19,7 @@ interface RegisterResult {
 }
 
 export default function LoginPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [departmentId, setDepartmentId] = useState("");
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -26,6 +28,26 @@ export default function LoginPage() {
   const [result, setResult] = useState<RegisterResult | null>(null);
   const [copied, setCopied] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [checking, setChecking] = useState(true);
+  const [existingAccount, setExistingAccount] = useState<{ uuid: string; email: string; role: string } | null>(null);
+  const [uuidCopied, setUuidCopied] = useState(false);
+
+  // Check if UUID already valid → show existing account screen instead of redirecting
+  useEffect(() => {
+    const uuid = localStorage.getItem("claude-reporter-uuid");
+    if (!uuid) { setChecking(false); return; }
+    fetch(`/api/auth/verify/${uuid}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.valid) {
+          localStorage.setItem("claude-reporter-email", d.email);
+          localStorage.setItem("claude-reporter-role", d.role ?? "member");
+          setExistingAccount({ uuid, email: d.email, role: d.role ?? "member" });
+        }
+        setChecking(false);
+      })
+      .catch(() => setChecking(false));
+  }, [router]);
 
   useEffect(() => {
     fetch("/api/departments")
@@ -56,6 +78,7 @@ export default function LoginPage() {
       setResult(data);
       setState("done");
       localStorage.setItem("claude-reporter-uuid", data.uuid);
+      localStorage.setItem("claude-reporter-email", data.email);
     } catch {
       setErrorMsg("Network error — is the server running?");
       setState("error");
@@ -72,6 +95,88 @@ export default function LoginPage() {
 
   const serverUrl =
     typeof window !== "undefined" ? window.location.origin : "";
+
+  if (checking) return null;
+
+  // ── Already logged in ──────────────────────────────────────────────────────
+  if (existingAccount) {
+    return (
+      <div style={{ maxWidth: 480, margin: "4rem auto" }}>
+        <div className="card">
+          <div style={{ textAlign: "center", marginBottom: "1.25rem" }}>
+            <div style={{
+              width: 52, height: 52, borderRadius: "50%", background: "var(--accent)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontWeight: 700, fontSize: "1.4rem", color: "#fff", margin: "0 auto 0.75rem",
+            }}>
+              {existingAccount.email[0].toUpperCase()}
+            </div>
+            <div style={{ fontWeight: 700, fontSize: "1rem" }}>{existingAccount.email}</div>
+            {existingAccount.role === "dept_head" && (
+              <div style={{ color: "#eab308", fontSize: "0.78rem", marginTop: 4 }}>👑 Trưởng phòng</div>
+            )}
+          </div>
+
+          <div style={{ marginBottom: "1.25rem" }}>
+            <div style={{ color: "var(--text-muted)", fontSize: "0.72rem", marginBottom: 6 }}>UUID của bạn</div>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+              <code style={{
+                flex: 1, background: "var(--bg)", border: "1px solid var(--border)",
+                borderRadius: 6, padding: "0.45rem 0.75rem", fontSize: "0.78rem",
+                color: "var(--accent)", wordBreak: "break-all",
+              }}>
+                {existingAccount.uuid}
+              </code>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(existingAccount.uuid).then(() => {
+                    setUuidCopied(true);
+                    setTimeout(() => setUuidCopied(false), 2000);
+                  });
+                }}
+                style={{
+                  background: uuidCopied ? "#14532d" : "var(--surface)",
+                  border: "1px solid var(--border)", borderRadius: 6,
+                  padding: "0.45rem 0.75rem", color: uuidCopied ? "var(--green)" : "var(--text-muted)",
+                  cursor: "pointer", fontSize: "0.78rem", whiteSpace: "nowrap", flexShrink: 0,
+                }}
+              >
+                {uuidCopied ? "✓ Copied" : "Copy"}
+              </button>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: "0.75rem", justifyContent: "center", flexWrap: "wrap" }}>
+            <Link
+              href={existingAccount.role === "dept_head" ? "/dept" : "/"}
+              style={{
+                background: "var(--accent)", color: "#fff", borderRadius: 6,
+                padding: "0.45rem 1.25rem", fontWeight: 600, fontSize: "0.85rem",
+                textDecoration: "none",
+              }}
+            >
+              Về trang chủ →
+            </Link>
+            <button
+              onClick={() => {
+                localStorage.removeItem("claude-reporter-uuid");
+                localStorage.removeItem("claude-reporter-email");
+                localStorage.removeItem("claude-reporter-role");
+                setExistingAccount(null);
+              }}
+              style={{
+                background: "none", border: "1px solid var(--border)", borderRadius: 6,
+                padding: "0.45rem 1rem", fontSize: "0.82rem",
+                color: "var(--text-muted)", cursor: "pointer",
+              }}
+            >
+              Đăng ký email khác
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ maxWidth: 560, margin: "4rem auto" }}>

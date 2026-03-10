@@ -16,14 +16,15 @@ export async function POST(req: NextRequest) {
 
   const existing = await prisma.user.findUnique({ where: { email } });
 
-  const updateData = body.departmentId ? { departmentId: body.departmentId } : {};
   const createData: { email: string; departmentId?: string } = { email };
   if (body.departmentId) createData.departmentId = body.departmentId;
+
+  const updateData = body.departmentId ? { departmentId: body.departmentId } : {};
 
   const user = await prisma.user.upsert({
     where: { email },
     create: createData,
-    update: existing ? {} : updateData,
+    update: updateData,
     include: { department: { select: { id: true, name: true } } },
   });
 

@@ -23,9 +23,13 @@ app.prepare().then(() => {
     handle(req, res, parsedUrl);
   });
 
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+    : process.env.NEXT_PUBLIC_BASE_URL ?? "*";
+
   io = new SocketIOServer(httpServer, {
     cors: {
-      origin: "*",
+      origin: allowedOrigins,
       methods: ["GET", "POST"],
     },
   });

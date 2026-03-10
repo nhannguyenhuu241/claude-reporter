@@ -3,9 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useRef } from "react";
 
 interface UserStats {
   email: string;
+  role: string;
   department: { id: string; name: string } | null;
   totalSessions: number;
   activeSessions: number;
@@ -26,6 +28,9 @@ export function UserProfile() {
   const [stats, setStats] = useState<UserStats | null>(null);
   const [stale, setStale] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showUuid, setShowUuid] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem("claude-reporter-uuid");
@@ -44,6 +49,7 @@ export function UserProfile() {
         }
         setStats({
           email: verify.email,
+          role: verify.role ?? "member",
           department: verify.department ?? null,
           totalSessions: s.totalSessions,
           activeSessions: s.activeSessions,
@@ -115,78 +121,126 @@ export function UserProfile() {
 
   if (!uuid || !stats) return null;
 
+  function copyUuid() {
+    navigator.clipboard.writeText(uuid!).then(() => {
+      setCopied(true);
+      if (copyRef.current) clearTimeout(copyRef.current);
+      copyRef.current = setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
   // ── Logged in ───────────────────────────────────────────────────────────────
   return (
-    <div
-      className="card"
-      style={{
-        marginBottom: "1.5rem",
-        display: "flex",
-        alignItems: "center",
-        gap: "1.5rem",
-        flexWrap: "wrap",
-        padding: "1rem 1.25rem",
-      }}
-    >
-      {/* Avatar + info */}
-      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-        <div
-          style={{
-            width: 40, height: 40, borderRadius: "50%", background: "var(--accent)",
+    <div style={{ marginBottom: "1.5rem" }}>
+      {/* Dept head banner */}
+      {stats.role === "dept_head" && (
+        <div style={{
+          background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.3)",
+          borderRadius: 8, padding: "0.6rem 1rem", marginBottom: "0.75rem",
+          display: "flex", alignItems: "center", gap: "0.75rem",
+        }}>
+          <span style={{ fontSize: "1rem" }}>👑</span>
+          <div style={{ flex: 1, fontSize: "0.82rem" }}>
+            <strong style={{ color: "#eab308" }}>Trưởng phòng {stats.department?.name}</strong>
+            <span style={{ color: "var(--text-muted)", marginLeft: 8 }}>
+              — Bạn có thể xem dashboard cá nhân bên dưới và xem báo cáo phòng ban.
+            </span>
+          </div>
+          <Link href="/dept" style={{
+            background: "#eab308", color: "#000", borderRadius: 6,
+            padding: "0.35rem 0.9rem", fontSize: "0.78rem", fontWeight: 700,
+            textDecoration: "none", whiteSpace: "nowrap",
+          }}>
+            Báo cáo phòng →
+          </Link>
+        </div>
+      )}
+
+      <div
+        className="card"
+        style={{
+          display: "flex", alignItems: "center", gap: "1.5rem",
+          flexWrap: "wrap", padding: "1rem 1.25rem",
+        }}
+      >
+        {/* Avatar + info */}
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: "50%",
+            background: stats.role === "dept_head" ? "#854d0e" : "var(--accent)",
             display: "flex", alignItems: "center", justifyContent: "center",
             fontWeight: 700, fontSize: "1rem", color: "#fff", flexShrink: 0,
-          }}
-        >
-          {stats.email[0].toUpperCase()}
-        </div>
-        <div>
-          <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{stats.email}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: 2 }}>
-            <div style={{ color: "var(--text-muted)", fontSize: "0.7rem", fontFamily: "monospace" }}>
-              {uuid.slice(0, 8)}…
+          }}>
+            {stats.email[0].toUpperCase()}
+          </div>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: "0.9rem" }}>{stats.email}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: 2 }}>
+              {/* UUID pill — click để hiện/ẩn full UUID */}
+              <button
+                onClick={() => setShowUuid(!showUuid)}
+                title="Bấm để xem UUID đầy đủ"
+                style={{
+                  background: "none", border: "none", cursor: "pointer", padding: 0,
+                  color: "var(--text-muted)", fontSize: "0.7rem", fontFamily: "monospace",
+                }}
+              >
+                {showUuid ? uuid : `${uuid.slice(0, 8)}…`}
+              </button>
+              {showUuid && (
+                <button
+                  onClick={copyUuid}
+                  style={{
+                    background: copied ? "rgba(34,197,94,0.1)" : "var(--surface)",
+                    border: `1px solid ${copied ? "var(--green)" : "var(--border)"}`,
+                    borderRadius: 4, padding: "0px 6px", fontSize: "0.65rem",
+                    color: copied ? "var(--green)" : "var(--text-muted)", cursor: "pointer",
+                  }}
+                >
+                  {copied ? "✓ Copied" : "Copy"}
+                </button>
+              )}
+              {stats.department && (
+                <span style={{
+                  background: "rgba(167,139,250,0.15)", border: "1px solid rgba(167,139,250,0.4)",
+                  borderRadius: 4, padding: "1px 6px", fontSize: "0.65rem", color: "#a78bfa",
+                }}>
+                  {stats.department.name}
+                </span>
+              )}
             </div>
-            {stats.department && (
-              <span style={{
-                background: "rgba(167,139,250,0.15)",
-                border: "1px solid rgba(167,139,250,0.4)",
-                borderRadius: 4, padding: "1px 6px",
-                fontSize: "0.65rem", color: "#a78bfa",
-              }}>
-                {stats.department.name}
-              </span>
-            )}
           </div>
         </div>
-      </div>
 
-      {/* Stats */}
-      <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
-        {[
-          { label: "Sessions", value: stats.totalSessions, sub: `${stats.activeSessions} active` },
-          { label: "Tokens", value: fmt(stats.totalTokens), sub: "total usage" },
-          { label: "24h Events", value: fmt(stats.recentActivity24h), sub: "recent activity" },
-          { label: "Est. Cost", value: `$${stats.estimatedCostUsd.toFixed(2)}`, sub: "Sonnet 4.6" },
-        ].map((item) => (
-          <div key={item.label}>
-            <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{item.label}</div>
-            <div style={{ fontWeight: 700, fontSize: "1rem", color: "var(--accent)" }}>{item.value}</div>
-            <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>{item.sub}</div>
-          </div>
-        ))}
-      </div>
+        {/* Stats */}
+        <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap" }}>
+          {[
+            { label: "Sessions", value: stats.totalSessions, sub: `${stats.activeSessions} active` },
+            { label: "Tokens", value: fmt(stats.totalTokens), sub: "total usage" },
+            { label: "24h Events", value: fmt(stats.recentActivity24h), sub: "recent activity" },
+            { label: "Est. Cost", value: `$${stats.estimatedCostUsd.toFixed(2)}`, sub: "Sonnet 4.6" },
+          ].map((item) => (
+            <div key={item.label}>
+              <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{item.label}</div>
+              <div style={{ fontWeight: 700, fontSize: "1rem", color: "var(--accent)" }}>{item.value}</div>
+              <div style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>{item.sub}</div>
+            </div>
+          ))}
+        </div>
 
-      {/* Actions */}
-      <div style={{ marginLeft: "auto", display: "flex", gap: "0.5rem", alignItems: "center" }}>
-        <Link
-          href={`/report?userId=${uuid}`}
-          style={{
-            background: "var(--accent)", color: "#fff", borderRadius: 6,
-            padding: "0.4rem 0.9rem", fontSize: "0.78rem", fontWeight: 600,
-            textDecoration: "none", whiteSpace: "nowrap",
-          }}
-        >
-          Export Report
-        </Link>
+        {/* Actions */}
+        <div style={{ marginLeft: "auto", display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <Link
+            href={`/report?userId=${uuid}`}
+            style={{
+              background: "var(--accent)", color: "#fff", borderRadius: 6,
+              padding: "0.4rem 0.9rem", fontSize: "0.78rem", fontWeight: 600,
+              textDecoration: "none", whiteSpace: "nowrap",
+            }}
+          >
+            Export Report
+          </Link>
+        </div>
       </div>
     </div>
   );

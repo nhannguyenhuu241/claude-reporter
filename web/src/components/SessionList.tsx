@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import Link from "next/link";
 
@@ -48,9 +48,11 @@ function groupByProject(sessions: Session[]) {
     return acc;
   }, {} as Record<string, Session[]>);
 
-  return Object.entries(map).sort(
-    ([, a], [, b]) => new Date(b[0].startedAt).getTime() - new Date(a[0].startedAt).getTime()
-  );
+  return Object.entries(map).sort(([, a], [, b]) => {
+    const bTime = b[0]?.startedAt ? new Date(b[0].startedAt).getTime() : 0;
+    const aTime = a[0]?.startedAt ? new Date(a[0].startedAt).getTime() : 0;
+    return bTime - aTime;
+  });
 }
 
 // ── Sub-component: project block ──────────────────────────────────────────
@@ -89,7 +91,7 @@ function ProjectBlock({
           )}
           <span style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>{sessions.length} session{sessions.length > 1 ? "s" : ""}</span>
           <span style={{ color: "var(--yellow)", fontSize: "0.68rem" }}>{fmt(totalTokens)} tok</span>
-          <span style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>{relativeTime(sessions[0].startedAt)}</span>
+          <span style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>{sessions[0]?.startedAt ? relativeTime(sessions[0].startedAt) : "—"}</span>
         </span>
       </button>
 
@@ -197,6 +199,11 @@ export function SessionList({ adminMode = false }: { adminMode?: boolean }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [updatedIds, setUpdatedIds] = useState<Set<string>>(new Set());
   const [myUuid, setMyUuid] = useState<string | null>(null);
+  const myUuidRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    myUuidRef.current = myUuid;
+  }, [myUuid]);
 
   useEffect(() => {
     const uuid = localStorage.getItem("claude-reporter-uuid");
@@ -215,11 +222,11 @@ export function SessionList({ adminMode = false }: { adminMode?: boolean }) {
     load(adminMode ? null : myUuid);
 
     const socket = io({ path: "/socket.io" });
-    socket.on("session_started", () => load(adminMode ? null : myUuid));
+    socket.on("session_started", () => load(adminMode ? null : myUuidRef.current));
     socket.on("session_updated", ({ sessionId }: { sessionId: string }) => {
       setUpdatedIds((prev) => new Set(Array.from(prev).concat(sessionId)));
       setTimeout(() => setUpdatedIds((prev) => { const n = new Set(prev); n.delete(sessionId); return n; }), 1500);
-      load(adminMode ? null : myUuid);
+      load(adminMode ? null : myUuidRef.current);
     });
 
     return () => { socket.disconnect(); };
@@ -235,7 +242,11 @@ export function SessionList({ adminMode = false }: { adminMode?: boolean }) {
           acc[key].sessions.push(s);
           return acc;
         }, {} as Record<string, { email: string | null; sessions: Session[] }>)
-      ).sort(([, a], [, b]) => new Date(b.sessions[0].startedAt).getTime() - new Date(a.sessions[0].startedAt).getTime())
+      ).sort(([, a], [, b]) => {
+        const bTime = b.sessions[0]?.startedAt ? new Date(b.sessions[0].startedAt).getTime() : 0;
+        const aTime = a.sessions[0]?.startedAt ? new Date(a.sessions[0].startedAt).getTime() : 0;
+        return bTime - aTime;
+      })
     : null;
 
   const projectGroups = !adminMode ? groupByProject(sessions) : null;

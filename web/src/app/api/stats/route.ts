@@ -4,6 +4,19 @@ import { prisma } from "@/lib/prisma";
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const userId = searchParams.get("userId") ?? null;
+
+  // Validate userId if provided
+  if (userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!user) {
+      return NextResponse.json({
+        totalSessions: 0, activeSessions: 0, totalTokens: 0,
+        estimatedCostUsd: 0, recentActivity24h: 0,
+        tokenBreakdown: { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 },
+      });
+    }
+  }
+
   const sessionWhere = userId ? { userId } : {};
 
   const [sessionStats, tokenTotals, recentActivity] = await Promise.all([

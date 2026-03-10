@@ -14,6 +14,14 @@ export async function GET(req: NextRequest) {
   const from = fromStr ? new Date(fromStr + "T00:00:00.000Z") : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const to = toStr ? new Date(toStr + "T23:59:59.999Z") : new Date();
 
+  // Validate userId if provided
+  if (userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
+    if (!user) {
+      return NextResponse.json({ from: from.toISOString(), to: to.toISOString(), totalSessions: 0, totalTokens: 0, totalEvents: 0, estimatedCostUsd: 0, projects: [] });
+    }
+  }
+
   const sessions = await prisma.session.findMany({
     where: {
       startedAt: { gte: from, lte: to },
