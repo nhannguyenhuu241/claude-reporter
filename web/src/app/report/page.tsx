@@ -392,56 +392,70 @@ function GeminiAnalysis({ reportData, reportType }: { reportData: unknown; repor
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [analysis, setAnalysis] = useState("");
 
-  async function analyze() {
+  useEffect(() => {
     setStatus("loading"); setAnalysis("");
-    try {
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reportData, reportType }),
-      });
-      const data = await res.json();
-      if (data.error) { setStatus("error"); setAnalysis(data.error); return; }
-      setAnalysis(data.analysis); setStatus("done");
-    } catch { setStatus("error"); }
+    fetch("/api/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reportData, reportType }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) { setStatus("error"); setAnalysis(data.error); return; }
+        setAnalysis(data.analysis); setStatus("done");
+      })
+      .catch(() => setStatus("error"));
+  }, []);
+
+  function renderMarkdown(text: string) {
+    return text.split("\n").map((line, i) => {
+      if (line.startsWith("## ")) return (
+        <div key={i} style={{ fontWeight: 700, fontSize: "0.88rem", color: "#6366f1", marginTop: i > 0 ? "1rem" : 0, marginBottom: "0.25rem" }}>
+          {line.replace(/^##\s+/, "")}
+        </div>
+      );
+      if (line.startsWith("### ")) return (
+        <div key={i} style={{ fontWeight: 600, fontSize: "0.82rem", color: "#8b5cf6", marginTop: "0.5rem", marginBottom: "0.15rem" }}>
+          {line.replace(/^###\s+/, "")}
+        </div>
+      );
+      if (line.startsWith("- ") || line.startsWith("* ")) return (
+        <div key={i} style={{ paddingLeft: "1rem", color: "var(--text-muted)" }}>
+          · {line.replace(/^[-*]\s+/, "").replace(/\*\*(.*?)\*\*/g, "$1")}
+        </div>
+      );
+      if (line.match(/^\d+\./)) return (
+        <div key={i} style={{ paddingLeft: "1rem", color: "var(--text-muted)" }}>
+          {line.replace(/\*\*(.*?)\*\*/g, "$1")}
+        </div>
+      );
+      if (line.trim() === "") return <div key={i} style={{ height: "0.3rem" }} />;
+      return (
+        <div key={i} style={{ color: "var(--text-muted)" }}>
+          {line.replace(/\*\*(.*?)\*\*/g, "$1")}
+        </div>
+      );
+    });
   }
 
   return (
     <div className="card" style={{ marginTop: "1.5rem", border: "1px solid rgba(99,102,241,0.3)", background: "rgba(99,102,241,0.04)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.75rem" }}>
-        <span style={{ fontSize: "1.1rem" }}>✨</span>
-        <span style={{ fontWeight: 700, fontSize: "0.95rem", color: "#6366f1" }}>Gemini AI Analysis</span>
-        <span style={{ fontSize: "0.68rem", color: "var(--text-muted)", marginLeft: 2 }}>
-          Phân tích năng suất sử dụng Claude Code
-        </span>
-        <button
-          onClick={analyze}
-          disabled={status === "loading"}
-          style={{
-            marginLeft: "auto", padding: "0.35rem 1rem", borderRadius: 6,
-            background: status === "loading" ? "var(--surface)" : "linear-gradient(135deg,#6366f1,#8b5cf6)",
-            border: "none", color: "#fff", fontSize: "0.78rem", fontWeight: 600,
-            cursor: status === "loading" ? "default" : "pointer",
-            opacity: status === "loading" ? 0.7 : 1,
-            display: "flex", alignItems: "center", gap: "0.4rem",
-          }}
-        >
-          {status === "loading" ? (
-            <><span style={{ display: "inline-block", animation: "spin 1s linear infinite" }}>⟳</span> Đang phân tích…</>
-          ) : status === "done" ? "🔄 Phân tích lại" : "✨ Phân tích với Gemini"}
-        </button>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
+        <span style={{ fontSize: "1rem" }}>✨</span>
+        <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "#6366f1" }}>AI Analysis</span>
+        {status === "loading" && (
+          <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>Đang phân tích…</span>
+        )}
       </div>
 
-      {status === "idle" && (
-        <div style={{ color: "var(--text-muted)", fontSize: "0.8rem", padding: "0.5rem 0" }}>
-          Bấm để Gemini phân tích dữ liệu report: patterns, điểm mạnh/yếu, đề xuất cải thiện.
-        </div>
-      )}
-
       {status === "loading" && (
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", color: "#6366f1", fontSize: "0.82rem", padding: "1rem 0" }}>
-          <span>Gemini đang đọc và phân tích dữ liệu</span>
-          <span style={{ animation: "pulse 1s infinite" }}>…</span>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[0, 1, 2].map((i) => (
+            <div key={i} style={{
+              width: 6, height: 6, borderRadius: "50%", background: "#6366f1",
+              animation: `bounce 1.2s ease-in-out ${i * 0.2}s infinite`,
+            }} />
+          ))}
         </div>
       )}
 
@@ -453,34 +467,7 @@ function GeminiAnalysis({ reportData, reportType }: { reportData: unknown; repor
 
       {status === "done" && analysis && (
         <div style={{ fontSize: "0.82rem", lineHeight: 1.7, color: "var(--text)" }}>
-          {analysis.split("\n").map((line, i) => {
-            if (line.startsWith("## ")) return (
-              <div key={i} style={{ fontWeight: 700, fontSize: "0.88rem", color: "#6366f1", marginTop: i > 0 ? "1rem" : 0, marginBottom: "0.25rem" }}>
-                {line.replace(/^##\s+/, "")}
-              </div>
-            );
-            if (line.startsWith("### ")) return (
-              <div key={i} style={{ fontWeight: 600, fontSize: "0.82rem", color: "#8b5cf6", marginTop: "0.5rem", marginBottom: "0.15rem" }}>
-                {line.replace(/^###\s+/, "")}
-              </div>
-            );
-            if (line.startsWith("- ") || line.startsWith("* ")) return (
-              <div key={i} style={{ paddingLeft: "1rem", color: "var(--text-muted)" }}>
-                · {line.replace(/^[-*]\s+/, "").replace(/\*\*(.*?)\*\*/g, "$1")}
-              </div>
-            );
-            if (line.match(/^\d+\./)) return (
-              <div key={i} style={{ paddingLeft: "1rem", color: "var(--text-muted)" }}>
-                {line.replace(/\*\*(.*?)\*\*/g, "$1")}
-              </div>
-            );
-            if (line.trim() === "") return <div key={i} style={{ height: "0.3rem" }} />;
-            return (
-              <div key={i} style={{ color: "var(--text-muted)" }}>
-                {line.replace(/\*\*(.*?)\*\*/g, "$1")}
-              </div>
-            );
-          })}
+          {renderMarkdown(analysis)}
         </div>
       )}
     </div>

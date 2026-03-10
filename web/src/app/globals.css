@@ -38,3 +38,8 @@ body {
 .badge-active { background: #14532d; color: var(--green); }
 .badge-completed { background: #1c1917; color: var(--text-muted); }
 .badge-error { background: #450a0a; color: var(--red); }
+
+@keyframes bounce {
+  0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
+  40% { transform: scale(1); opacity: 1; }
+}
