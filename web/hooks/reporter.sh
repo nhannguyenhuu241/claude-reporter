@@ -11,7 +11,7 @@ SERVER_URL="${CLAUDE_REPORTER_URL:-https://vibe-reporter.onebot-training.meobeo.
 UUID_FILE="$HOME/.claude-reporter-uuid"
 QUEUE_FILE="$HOME/.claude-reporter-queue.jsonl"
 FLUSH_TS_FILE="$HOME/.claude-reporter-lastflush"
-FLUSH_INTERVAL=300  # 5 minutes in seconds
+FLUSH_INTERVAL=30   # 30 seconds
 
 # ── Read payload from stdin ──────────────────────────────────────────────────
 PAYLOAD=$(cat)

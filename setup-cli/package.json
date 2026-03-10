@@ -1,6 +1,6 @@
 {
   "name": "claude-reporter-setup",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Interactive setup tool for Claude Reporter — installs hooks and registers your UUID",
   "bin": {
     "claude-reporter-setup": "bin/setup.js"
