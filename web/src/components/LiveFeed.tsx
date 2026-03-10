@@ -13,9 +13,10 @@ interface LiveEvent {
   assistantMessage?: string;
 }
 
+// Only show these meaningful event types — hide tool_use/tool_start noise
+const VISIBLE_EVENTS = new Set(["user_prompt", "assistant_message", "session_start", "session_end"]);
+
 const EVENT_ICONS: Record<string, string> = {
-  tool_start: "⚡",
-  tool_use: "🔧",
   user_prompt: "💬",
   assistant_message: "🤖",
   session_start: "🚀",
@@ -23,24 +24,27 @@ const EVENT_ICONS: Record<string, string> = {
 };
 
 const EVENT_COLORS: Record<string, string> = {
-  tool_start: "#f59e0b",
-  tool_use: "#3b82f6",
   user_prompt: "#8b5cf6",
   assistant_message: "#10b981",
   session_start: "#06b6d4",
   session_end: "#6b7280",
 };
 
-function truncate(s: string, n = 100) {
+const EVENT_LABELS: Record<string, string> = {
+  user_prompt: "Prompt",
+  assistant_message: "Claude",
+  session_start: "Session started",
+  session_end: "Session ended",
+};
+
+function truncate(s: string, n = 160) {
   return s && s.length > n ? s.slice(0, n) + "…" : s;
 }
 
 function eventLabel(e: LiveEvent) {
-  if (e.eventType === "tool_use" || e.eventType === "tool_start")
-    return e.toolName ?? "unknown tool";
   if (e.eventType === "user_prompt") return truncate(e.userPrompt ?? "");
   if (e.eventType === "assistant_message") return truncate(e.assistantMessage ?? "");
-  return e.eventType;
+  return EVENT_LABELS[e.eventType] ?? e.eventType;
 }
 
 function timeLabel(ts: string) {
@@ -135,10 +139,10 @@ export function LiveFeed() {
     };
   }, [filter, mergeEvents]);
 
-  const filteredEvents = events;
+  const filteredEvents = events.filter((e) => VISIBLE_EVENTS.has(e.eventType));
 
   return (
-    <div className="card" style={{ height: 400, display: "flex", flexDirection: "column" }}>
+    <div className="card" style={{ height: 520, display: "flex", flexDirection: "column" }}>
       {/* Header */}
       <div
         style={{
@@ -199,42 +203,40 @@ export function LiveFeed() {
             <div
               key={e.id}
               style={{
-                display: "flex",
-                alignItems: "baseline",
-                gap: "0.4rem",
-                fontSize: "0.76rem",
-                padding: "3px 0",
-                borderBottom: "1px solid var(--border)",
+                padding: "6px 8px",
+                borderRadius: 6,
+                borderLeft: `3px solid ${EVENT_COLORS[e.eventType] ?? "var(--border)"}`,
+                background: "rgba(255,255,255,0.02)",
+                marginBottom: 3,
               }}
             >
-              <span style={{ minWidth: 18, color: EVENT_COLORS[e.eventType] ?? "var(--text-muted)" }}>
-                {EVENT_ICONS[e.eventType] ?? "•"}
-              </span>
-              <span style={{ color: "var(--text-muted)", minWidth: 62, fontSize: "0.68rem", flexShrink: 0 }}>
-                {timeLabel(e.timestamp)}
-              </span>
-              <span
-                style={{
-                  color: "var(--accent)",
-                  minWidth: 58,
-                  fontSize: "0.68rem",
-                  fontFamily: "monospace",
-                  flexShrink: 0,
-                }}
-              >
-                {e.sessionId.slice(0, 8)}
-              </span>
-              <span
-                style={{
-                  color: EVENT_COLORS[e.eventType] ?? "var(--text)",
-                  overflow: "hidden",
-                  whiteSpace: "nowrap",
-                  textOverflow: "ellipsis",
-                  fontSize: "0.74rem",
-                }}
-              >
-                {eventLabel(e)}
-              </span>
+              {/* Top row: icon + type label + session + time */}
+              <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: e.eventType === "user_prompt" || e.eventType === "assistant_message" ? 4 : 0 }}>
+                <span style={{ fontSize: "0.75rem" }}>
+                  {EVENT_ICONS[e.eventType] ?? "•"}
+                </span>
+                <span style={{ fontSize: "0.68rem", fontWeight: 600, color: EVENT_COLORS[e.eventType] ?? "var(--text-muted)" }}>
+                  {EVENT_LABELS[e.eventType] ?? e.eventType}
+                </span>
+                <span style={{ fontSize: "0.63rem", color: "var(--accent)", fontFamily: "monospace" }}>
+                  #{e.sessionId.slice(0, 8)}
+                </span>
+                <span style={{ marginLeft: "auto", fontSize: "0.63rem", color: "var(--text-muted)", flexShrink: 0 }}>
+                  {timeLabel(e.timestamp)}
+                </span>
+              </div>
+              {/* Content row: only for prompt/message */}
+              {(e.eventType === "user_prompt" || e.eventType === "assistant_message") && (
+                <div style={{
+                  fontSize: "0.76rem",
+                  color: e.eventType === "user_prompt" ? "var(--text)" : "var(--text-muted)",
+                  lineHeight: 1.45,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}>
+                  {eventLabel(e)}
+                </div>
+              )}
             </div>
           ))
         )}
