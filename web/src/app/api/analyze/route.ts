@@ -31,57 +31,82 @@ function buildPrompt(data: unknown, type: "team" | "project"): string {
   const json = JSON.stringify(data, null, 2);
 
   if (type === "team") {
-    return `Bạn là chuyên gia phân tích năng suất làm việc với Claude Code.
-Dưới đây là dữ liệu báo cáo team sử dụng Claude Code AI assistant.
+    return `Bạn là chuyên gia phân tích năng suất làm việc với Claude Code AI assistant.
+Dưới đây là dữ liệu báo cáo team với các metric quan trọng:
+
+**Giải thích metrics:**
+- **promptEfficiency** (0-100%): % prompt thực sự có nghĩa / tổng prompt. Cao = ít noise, chất lượng cao.
+- **tokensPerPrompt**: Trung bình token mỗi prompt. Cao = context phức tạp, deep work.
+- **sessionDepth**: Trung bình prompt/session. Cao = hội thoại sâu, vấn đề phức tạp.
+- **cacheHitRate** (0-100%): Tỷ lệ cache token hit. Cao = context được tái sử dụng tốt, tiết kiệm chi phí.
+- **activeDays**: Số ngày hoạt động trong kỳ. Đo độ đều đặn.
+- **meaningfulPrompts**: Prompt thực chất (loại bỏ system/noise prompts).
+- **estimatedCostUsd**: Chi phí ước tính theo model pricing.
+
+**Công thức đánh giá:**
+- Prompt Efficiency ≥ 80% → Tốt | 50-79% → Trung bình | < 50% → Cần cải thiện
+- Cache Hit Rate ≥ 30% → Tốt (tái sử dụng context hiệu quả)
+- Session Depth ≥ 5 → Hội thoại sâu | < 3 → Nhiều session ngắn
+- Cost/Prompt = estimatedCostUsd / totalPrompts → hiệu quả chi phí
 
 DỮ LIỆU BÁO CÁO TEAM:
 ${json}
 
-Hãy phân tích và trả lời theo cấu trúc markdown sau:
+Hãy phân tích theo cấu trúc markdown sau (ngắn gọn, dựa 100% vào số liệu thực tế):
 
 ## 📊 Tổng quan team
-(Nhận xét tổng thể về mức độ sử dụng, số prompts, tokens, chi phí)
+(Tổng prompts, sessions, tokens, chi phí, kỳ báo cáo — 2-3 dòng)
 
 ## 🏆 Thành viên nổi bật
-(Top thành viên hiệu quả nhất và lý do — dựa trên promptEfficiency, tokensPerPrompt, sessionDepth)
+(Top 2-3 thành viên hiệu quả nhất. Dẫn chứng bằng số: promptEfficiency, tokensPerPrompt, sessionDepth, cacheHitRate)
 
 ## ⚠️ Điểm cần cải thiện
-(Thành viên hoặc pattern nào cần chú ý — prompts noise cao, efficiency thấp, v.v.)
+(Thành viên hoặc pattern nào có vấn đề: efficiency thấp, cacheHit thấp, ít ngày hoạt động, cost/prompt cao)
 
-## 💡 Phân tích pattern làm việc
-(Xu hướng sử dụng theo tuần, dự án nào được dùng nhiều, loại công việc nào)
+## 💡 Pattern làm việc
+(Ai làm deep work, ai làm quick queries? Ai dùng cache tốt? Phân phối dự án?)
 
 ## 🎯 Đề xuất cụ thể
-(3-5 đề xuất cải thiện năng suất cho team, dựa trên số liệu thực tế)
+(3-5 action items cụ thể, có số liệu làm căn cứ)
 
 ## 💰 Hiệu quả chi phí
-(Nhận xét về tỷ lệ token/prompt và cost, có hợp lý không)
-
-Hãy phân tích dựa hoàn toàn vào số liệu thực tế, ngắn gọn và actionable.`;
+(Cost/prompt từng người, tổng cost, cache hit rate — có đáng đồng tiền không?)`;
   }
 
-  return `Bạn là chuyên gia phân tích năng suất làm việc với Claude Code.
-Dưới đây là dữ liệu báo cáo sử dụng Claude Code theo dự án.
+  return `Bạn là chuyên gia phân tích năng suất Claude Code.
+Dưới đây là dữ liệu báo cáo sử dụng theo dự án.
+
+**Giải thích metrics:**
+- **inputTokens**: Token từ user + context gửi vào model
+- **outputTokens**: Token Claude sinh ra (đắt hơn input ~3x)
+- **cacheCreationTokens**: Token tạo cache lần đầu (tốn 25% thêm)
+- **cacheReadTokens**: Token đọc từ cache (rẻ hơn 90% so với input)
+- **cacheHitRate** = cacheReadTokens / (inputTokens + cacheReadTokens) × 100
+- **estimatedCostUsd**: Chi phí ước tính (Sonnet: $3/$15 per 1M in/out)
+- **sessions**: Số phiên làm việc | **events**: Tổng sự kiện hook
+
+**Tín hiệu tốt:**
+- Cache hit rate > 30% → Context dài, tái sử dụng tốt
+- Output/Input ratio > 0.3 → Claude sinh nhiều code/nội dung
+- Cost/session thấp → Hiệu quả
 
 DỮ LIỆU BÁO CÁO DỰ ÁN:
 ${json}
 
-Hãy phân tích và trả lời theo cấu trúc markdown sau:
+Phân tích theo cấu trúc markdown (ngắn gọn, số liệu thực tế):
 
 ## 📊 Tổng quan
-(Mức độ sử dụng tổng thể, khoảng thời gian, số sessions và events)
+(Sessions, events, tổng token, chi phí, kỳ thời gian — 2-3 dòng)
 
 ## 🗂️ Dự án nổi bật
-(Dự án nào được đầu tư nhiều nhất, chi phí và token breakdown)
+(Top 3 dự án tốn nhiều token/cost nhất. Lý do hợp lý không?)
 
-## 📈 Xu hướng & Pattern
-(Nhận xét về phân phối token: input/output/cache — tỷ lệ cache hit tốt không?)
+## 📈 Phân tích token & cache
+(inputTokens vs outputTokens vs cacheRead — tỷ lệ cache hit? Có đang tận dụng cache tốt không?)
 
 ## 💡 Insights
-(Điều gì thú vị hoặc đáng chú ý từ dữ liệu)
+(Điều thú vị: project nào hiệu quả nhất về cost/session, ai dùng nhiều nhất)
 
 ## 🎯 Đề xuất
-(2-3 đề xuất tối ưu hóa dựa trên số liệu)
-
-Ngắn gọn, dựa trên số liệu thực tế.`;
+(2-3 cách tối ưu: tăng cache hit, giảm output token waste, tập trung vào project ROI cao)`;
 }
