@@ -513,6 +513,370 @@ function GeminiAnalysis({ reportData, reportType }: { reportData: unknown; repor
   );
 }
 
+// ─── Prompt Quality Dashboard ─────────────────────────────────────────────────
+
+interface PQWeek { week: string; prompts: number; repetitionPct: number; codeDumpPct: number; vaguePct: number; score: number; trend: string }
+interface PQMember {
+  userId: string; email: string; totalPrompts: number; problematicCount: number;
+  repetitionPct: number; codeDumpPct: number; vaguePct: number;
+  efficiencyScore: number; status: string;
+  weeklyScores: PQWeek[];
+  problems: { repeated: string[]; codeDumps: string[]; vague: string[] };
+}
+interface PQData {
+  from: string; to: string; totalPrompts: number; totalMembers: number;
+  avgEfficiencyScore: number; problematicCount: number; problematicPct: number;
+  topPerformer: PQMember | null;
+  issueRates: { repetition: number; codeDump: number; vague: number; total: number };
+  weeklyTrend: PQWeek[];
+  members: PQMember[];
+}
+
+function scoreColor(s: number) {
+  if (s >= 80) return "#4ade80";
+  if (s >= 60) return "#fb923c";
+  return "#f87171";
+}
+function scoreStatusColor(status: string) {
+  if (status === "TỐT") return { bg: "rgba(74,222,128,0.12)", color: "#4ade80" };
+  if (status === "TRUNG BÌNH") return { bg: "rgba(251,146,60,0.12)", color: "#fb923c" };
+  return { bg: "rgba(248,113,113,0.12)", color: "#f87171" };
+}
+
+function IssueBar({ label, pct, warn }: { label: string; pct: number; warn: number }) {
+  const over = pct > warn;
+  const color = over ? "#f87171" : "#fb923c";
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "1rem", padding: "0.6rem 0", borderBottom: "1px solid var(--border)" }}>
+      <div style={{ width: 140, fontSize: "0.82rem", color: "var(--text-muted)" }}>{label}</div>
+      <div style={{ flex: 1, height: 10, background: "var(--border)", borderRadius: 5, overflow: "hidden" }}>
+        <div style={{ width: `${Math.min(pct, 100)}%`, height: "100%", background: color, borderRadius: 5, transition: "width 0.5s ease" }} />
+      </div>
+      <div style={{ width: 52, fontWeight: 700, fontSize: "0.88rem", color, textAlign: "right" }}>{pct}%</div>
+    </div>
+  );
+}
+
+function ScoreBar({ score }: { score: number }) {
+  const color = scoreColor(score);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ flex: 1, height: 6, background: "var(--border)", borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ width: `${score}%`, height: "100%", background: color, borderRadius: 3, transition: "width 0.6s ease" }} />
+      </div>
+      <span style={{ fontWeight: 700, fontSize: "0.88rem", color, minWidth: 36, textAlign: "right" }}>{score}</span>
+    </div>
+  );
+}
+
+function MemberPQCard({ m, rank }: { m: PQMember; rank: number }) {
+  const [open, setOpen] = useState(false);
+  const sc = scoreStatusColor(m.status);
+  const rankStyle: React.CSSProperties = rank === 1
+    ? { background: "#ffd700", color: "#000" }
+    : rank === 2 ? { background: "#c0c0c0", color: "#000" }
+    : rank === 3 ? { background: "#cd7f32", color: "#fff" }
+    : { background: "var(--surface)", color: "var(--text-muted)" };
+
+  return (
+    <div className="card" style={{ marginBottom: "0.6rem", padding: "1rem 1.25rem" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+        <span style={{ ...rankStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: "50%", fontWeight: 700, fontSize: "0.82rem", flexShrink: 0 }}>{rank}</span>
+        <div style={{ flex: 1, minWidth: 120 }}>
+          <div style={{ fontWeight: 600, fontSize: "0.92rem" }}>{m.email}</div>
+          <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", marginTop: 2 }}>{m.totalPrompts} prompts · {m.problematicCount} có vấn đề</div>
+        </div>
+
+        {/* Score */}
+        <div style={{ minWidth: 180, flex: 1 }}>
+          <div style={{ fontSize: "0.63rem", color: "var(--text-muted)", marginBottom: 4 }}>
+            Hiệu quả = 100 - ({m.repetitionPct}%×0.4) - ({m.codeDumpPct}%×0.3) - ({m.vaguePct}%×0.3)
+          </div>
+          <ScoreBar score={m.efficiencyScore} />
+        </div>
+
+        {/* Metric chips */}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[
+            { label: "Lặp lại", val: m.repetitionPct, warn: 20 },
+            { label: "Code Dump", val: m.codeDumpPct, warn: 15 },
+            { label: "Mơ hồ", val: m.vaguePct, warn: 10 },
+          ].map((c) => (
+            <div key={c.label} style={{ fontSize: "0.68rem", textAlign: "center" }}>
+              <div style={{ color: "var(--text-muted)" }}>{c.label}</div>
+              <div style={{ fontWeight: 700, color: c.val > c.warn ? "#f87171" : "var(--text)" }}>{c.val}%</div>
+            </div>
+          ))}
+        </div>
+
+        <span style={{ ...sc, borderRadius: 6, padding: "2px 10px", fontSize: "0.72rem", fontWeight: 700 }}>{m.status}</span>
+
+        <button onClick={() => setOpen(!open)} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 5, padding: "3px 10px", fontSize: "0.72rem", color: "var(--text-muted)", cursor: "pointer" }}>
+          {open ? "Thu gọn ▲" : "Chi tiết ▼"}
+        </button>
+      </div>
+
+      {open && (
+        <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border)", paddingTop: "1rem", display: "flex", flexDirection: "column", gap: "0.75rem" }}>
+          {/* Weekly trend for this member */}
+          {m.weeklyScores.length > 0 && (
+            <div>
+              <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "var(--text-muted)", marginBottom: 6 }}>Xu hướng theo tuần</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {m.weeklyScores.map((w) => (
+                  <div key={w.week} style={{ textAlign: "center", minWidth: 52 }}>
+                    <div style={{ fontSize: "0.6rem", color: "var(--text-muted)" }}>{w.week}</div>
+                    <div style={{ fontWeight: 700, fontSize: "0.88rem", color: scoreColor(w.score) }}>{w.score}</div>
+                    <div style={{ fontSize: "0.6rem", color: "var(--text-muted)" }}>{w.prompts}p</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Problem examples */}
+          {m.problems.repeated.length > 0 && (
+            <div>
+              <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "#fb923c", marginBottom: 4 }}>🔄 Prompts lặp lại ({m.problems.repeated.length} mẫu)</div>
+              {m.problems.repeated.map((p, i) => (
+                <div key={i} style={{ fontSize: "0.72rem", padding: "4px 8px", background: "rgba(251,146,60,0.06)", borderLeft: "2px solid #fb923c", marginBottom: 3, borderRadius: "0 4px 4px 0", color: "var(--text-muted)" }}>
+                  "{p}{p.length >= 120 ? "…" : ""}"
+                </div>
+              ))}
+            </div>
+          )}
+          {m.problems.codeDumps.length > 0 && (
+            <div>
+              <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "#a78bfa", marginBottom: 4 }}>📋 Code dump ({m.problems.codeDumps.length} mẫu)</div>
+              {m.problems.codeDumps.map((p, i) => (
+                <div key={i} style={{ fontSize: "0.72rem", padding: "4px 8px", background: "rgba(167,139,250,0.06)", borderLeft: "2px solid #a78bfa", marginBottom: 3, borderRadius: "0 4px 4px 0", color: "var(--text-muted)" }}>
+                  "{p}{p.length >= 120 ? "…" : ""}"
+                </div>
+              ))}
+            </div>
+          )}
+          {m.problems.vague.length > 0 && (
+            <div>
+              <div style={{ fontSize: "0.72rem", fontWeight: 600, color: "#f87171", marginBottom: 4 }}>❓ Prompts mơ hồ ({m.problems.vague.length} mẫu)</div>
+              {m.problems.vague.map((p, i) => (
+                <div key={i} style={{ fontSize: "0.72rem", padding: "4px 8px", background: "rgba(248,113,113,0.06)", borderLeft: "2px solid #f87171", marginBottom: 3, borderRadius: "0 4px 4px 0", color: "var(--text-muted)" }}>
+                  "{p}{p.length >= 120 ? "…" : ""}"
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PromptQualityView({ from, to, userId }: { from: string; to: string; userId: string }) {
+  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [data, setData] = useState<PQData | null>(null);
+  const tick = useAutoRefresh(60_000);
+
+  async function load() {
+    setStatus("loading");
+    try {
+      const qs = new URLSearchParams({ from, to, ...(userId ? { userId } : {}) });
+      const res = await fetch(`/api/report/prompt-quality?${qs}`);
+      const json: PQData = await res.json();
+      setData(json); setStatus("done");
+    } catch { setStatus("error"); }
+  }
+
+  useEffect(() => { load(); }, [from, to, userId]);
+  useEffect(() => { if (status === "done") load(); }, [tick]);
+
+  const firstScore = data?.weeklyTrend[0]?.score ?? 0;
+  const lastScore = data?.weeklyTrend[data.weeklyTrend.length - 1]?.score ?? 0;
+  const scoreDiff = Math.round((lastScore - firstScore) * 10) / 10;
+
+  return (
+    <>
+      <div style={{ textAlign: "right", marginBottom: "1rem" }}>
+        <button onClick={load} disabled={status === "loading"} style={{
+          background: status === "loading" ? "var(--surface)" : "var(--accent)",
+          color: "#fff", border: "none", borderRadius: 6,
+          padding: "0.45rem 1.25rem", fontWeight: 600, fontSize: "0.85rem",
+          cursor: status === "loading" ? "default" : "pointer", opacity: status === "loading" ? 0.7 : 1,
+        }}>
+          {status === "loading" ? "Đang tính…" : "Làm mới"}
+        </button>
+      </div>
+
+      {status === "loading" && (
+        <div className="card" style={{ textAlign: "center", padding: "2rem" }}>
+          <div style={{ color: "var(--accent)", fontSize: "0.9rem" }}>⏳ Đang phân tích chất lượng prompt…</div>
+        </div>
+      )}
+      {status === "error" && <div className="card" style={{ color: "var(--red)", textAlign: "center" }}>Có lỗi. Thử lại nhé.</div>}
+
+      {status === "done" && data && (
+        <>
+          {/* Overview cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: "0.75rem", marginBottom: "1.25rem" }}>
+            {[
+              { label: "Tổng Thành Viên", value: data.totalMembers, color: "var(--accent)" },
+              { label: "Tổng Prompts", value: data.totalPrompts.toLocaleString(), color: "#4ade80" },
+              { label: "Sessions phân tích", value: data.weeklyTrend.reduce((s, w) => s + w.prompts, 0).toLocaleString(), color: "#06b6d4" },
+            ].map((c) => (
+              <div key={c.label} className="card" style={{ padding: "0.75rem 1rem" }}>
+                <div style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>{c.label}</div>
+                <div style={{ color: c.color, fontSize: "1.4rem", fontWeight: 700, lineHeight: 1.2 }}>{c.value}</div>
+              </div>
+            ))}
+            <div className="card" style={{ padding: "0.75rem 1rem" }}>
+              <div style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>Điểm Hiệu Quả TB</div>
+              <div style={{ color: scoreColor(data.avgEfficiencyScore), fontSize: "1.4rem", fontWeight: 700, lineHeight: 1.2 }}>{data.avgEfficiencyScore}</div>
+              <div style={{ fontSize: "0.62rem", color: "var(--text-muted)" }}>Trung bình toàn team</div>
+            </div>
+            <div className="card" style={{ padding: "0.75rem 1rem" }}>
+              <div style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>Prompts Có Vấn Đề</div>
+              <div style={{ color: "#fb923c", fontSize: "1.4rem", fontWeight: 700, lineHeight: 1.2 }}>{data.problematicPct}%</div>
+              <div style={{ fontSize: "0.62rem", color: "var(--text-muted)" }}>{data.problematicCount} prompts cần cải thiện</div>
+            </div>
+            <div className="card" style={{ padding: "0.75rem 1rem" }}>
+              <div style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>Top Performer</div>
+              <div style={{ color: "#4ade80", fontSize: "1.1rem", fontWeight: 700, lineHeight: 1.4 }}>{data.topPerformer?.email.split("@")[0] ?? "—"}</div>
+              <div style={{ fontSize: "0.62rem", color: "var(--text-muted)" }}>Điểm hiệu quả: {data.topPerformer?.efficiencyScore ?? 0}</div>
+            </div>
+          </div>
+
+          {/* Formula card */}
+          <div className="card" style={{ marginBottom: "1.25rem", background: "rgba(99,102,241,0.04)", border: "1px solid rgba(99,102,241,0.2)" }}>
+            <div style={{ fontWeight: 700, fontSize: "0.85rem", marginBottom: "0.5rem" }}>📐 Công Thức Tính Điểm Hiệu Quả</div>
+            <div style={{ fontFamily: "monospace", fontSize: "0.82rem", background: "rgba(0,0,0,0.2)", padding: "0.6rem 0.9rem", borderRadius: 6, marginBottom: "0.75rem", color: "#a5b4fc" }}>
+              Efficiency Score = 100 − (Repetition% × 0.4) − (CodeDump% × 0.3) − (Vague% × 0.3)
+            </div>
+            <div style={{ display: "flex", gap: "1.5rem", flexWrap: "wrap", fontSize: "0.75rem", color: "var(--text-muted)" }}>
+              <span><strong style={{ color: "#fb923c" }}>Repetition%</strong> = prompt lặp lại / tổng · Trọng số 40%</span>
+              <span><strong style={{ color: "#a78bfa" }}>CodeDump%</strong> = paste code không giải thích / tổng · Trọng số 30%</span>
+              <span><strong style={{ color: "#f87171" }}>Vague%</strong> = prompt mơ hồ, thiếu chi tiết / tổng · Trọng số 30%</span>
+            </div>
+            <div style={{ marginTop: "0.5rem", fontSize: "0.72rem", color: "var(--text-muted)" }}>
+              Tiêu chí: <span style={{ color: "#4ade80", fontWeight: 600 }}>≥80: TỐT</span> · <span style={{ color: "#fb923c", fontWeight: 600 }}>60–79: TRUNG BÌNH</span> · <span style={{ color: "#f87171", fontWeight: 600 }}>&lt;60: CẦN CẢI THIỆN</span>
+            </div>
+          </div>
+
+          {/* Issue rates */}
+          <div className="card" style={{ marginBottom: "1.25rem" }}>
+            <div style={{ fontWeight: 700, fontSize: "0.88rem", marginBottom: "0.75rem" }}>📈 Tỉ Lệ Các Vấn Đề Chính</div>
+            <IssueBar label="Tỉ Lệ Lặp Lại" pct={data.issueRates.repetition} warn={20} />
+            <IssueBar label="Code Dump Rate" pct={data.issueRates.codeDump} warn={15} />
+            <IssueBar label="Tỉ Lệ Mơ Hồ" pct={data.issueRates.vague} warn={10} />
+            <IssueBar label="Tổng Có Vấn Đề" pct={data.issueRates.total} warn={18} />
+            <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
+              ⚠ Ngưỡng cảnh báo: Lặp lại &gt;20% · Code Dump &gt;15% · Mơ hồ &gt;10%
+            </div>
+          </div>
+
+          {/* Member ranking */}
+          <div style={{ fontWeight: 700, fontSize: "0.9rem", marginBottom: "0.75rem" }}>👥 Bảng Xếp Hạng Thành Viên</div>
+          {data.members.map((m, i) => <MemberPQCard key={m.userId} m={m} rank={i + 1} />)}
+          {data.members.length === 0 && (
+            <div className="card" style={{ textAlign: "center", color: "var(--text-muted)", padding: "2rem" }}>
+              Không có dữ liệu. Cần có user_prompt events trong khoảng thời gian này.
+            </div>
+          )}
+
+          {/* Weekly trend table */}
+          {data.weeklyTrend.length > 0 && (
+            <div className="card" style={{ marginTop: "1.25rem" }}>
+              <div style={{ fontWeight: 700, fontSize: "0.88rem", marginBottom: "0.75rem" }}>📈 Phân Tích Xu Hướng Theo Tuần</div>
+
+              {/* Mini chart */}
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 6, marginBottom: "1rem", height: 64 }}>
+                {data.weeklyTrend.map((w) => (
+                  <div key={w.week} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                    <div style={{ fontSize: "0.6rem", color: scoreColor(w.score), fontWeight: 700 }}>{w.score}</div>
+                    <div style={{
+                      width: "100%", background: scoreColor(w.score), borderRadius: "3px 3px 0 0",
+                      height: `${Math.max(8, (w.score / 100) * 48)}px`, opacity: 0.85,
+                    }} />
+                    <div style={{ fontSize: "0.58rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{w.week}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Trend table */}
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem" }}>
+                  <thead>
+                    <tr>
+                      {["Tuần", "Prompts", "Repetition%", "CodeDump%", "Vague%", "Score", "Xu Hướng"].map((h) => (
+                        <th key={h} style={{ textAlign: "left", padding: "6px 10px", color: "var(--text-muted)", borderBottom: "1px solid var(--border)", fontWeight: 600, fontSize: "0.7rem", background: "var(--surface)" }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.weeklyTrend.map((w) => (
+                      <tr key={w.week} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <td style={{ padding: "6px 10px", fontWeight: 600 }}>{w.week}</td>
+                        <td style={{ padding: "6px 10px" }}>{w.prompts}</td>
+                        <td style={{ padding: "6px 10px", color: w.repetitionPct > 20 ? "#f87171" : "var(--text)" }}>{w.repetitionPct}%</td>
+                        <td style={{ padding: "6px 10px", color: w.codeDumpPct > 15 ? "#f87171" : "var(--text)" }}>{w.codeDumpPct}%</td>
+                        <td style={{ padding: "6px 10px", color: w.vaguePct > 10 ? "#f87171" : "var(--text)" }}>{w.vaguePct}%</td>
+                        <td style={{ padding: "6px 10px", fontWeight: 700, color: scoreColor(w.score) }}>{w.score}</td>
+                        <td style={{ padding: "6px 10px", color: w.trend.startsWith("↑") ? "#4ade80" : w.trend.startsWith("↓") ? "#f87171" : "var(--text-muted)" }}>{w.trend}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Summary */}
+              {data.weeklyTrend.length > 1 && (
+                <div style={{ marginTop: "0.75rem", padding: "0.75rem", background: scoreDiff >= 0 ? "rgba(74,222,128,0.06)" : "rgba(248,113,113,0.06)", borderRadius: 8, fontSize: "0.78rem" }}>
+                  <strong>Tuần đầu → Tuần cuối:</strong> Score từ <strong style={{ color: scoreColor(firstScore) }}>{firstScore}</strong> → <strong style={{ color: scoreColor(lastScore) }}>{lastScore}</strong>
+                  <span style={{ color: scoreDiff >= 0 ? "#4ade80" : "#f87171", marginLeft: 8 }}>({scoreDiff >= 0 ? "+" : ""}{scoreDiff} điểm, {scoreDiff >= 0 ? "+" : ""}{Math.round((scoreDiff / firstScore) * 100)}%)</span>
+                  <div style={{ marginTop: 4, color: "var(--text-muted)" }}>
+                    {scoreDiff >= 0 ? "📈 Xu hướng tích cực — chất lượng prompt cải thiện qua các tuần" : "📉 Xu hướng giảm — cần chú ý cải thiện chất lượng prompt"}
+                  </div>
+                </div>
+              )}
+
+              {/* Top 3 improvers */}
+              {data.members.length >= 2 && (() => {
+                const sorted = [...data.members].filter((m) => m.weeklyScores.length >= 2)
+                  .map((m) => ({
+                    m,
+                    first: m.weeklyScores[0].score,
+                    last: m.weeklyScores[m.weeklyScores.length - 1].score,
+                    diff: m.weeklyScores[m.weeklyScores.length - 1].score - m.weeklyScores[0].score,
+                  }))
+                  .sort((a, b) => b.diff - a.diff)
+                  .slice(0, 3);
+                if (sorted.length === 0) return null;
+                return (
+                  <div style={{ marginTop: "1rem" }}>
+                    <div style={{ fontWeight: 700, fontSize: "0.82rem", marginBottom: "0.6rem" }}>🏆 Top thành viên cải thiện nhiều nhất</div>
+                    {sorted.map((s, i) => (
+                      <div key={s.m.userId} style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.5rem 0.75rem", background: "var(--surface)", borderRadius: 8, marginBottom: 6 }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, borderRadius: "50%", fontWeight: 700, fontSize: "0.75rem", flexShrink: 0, background: i === 0 ? "#ffd700" : i === 1 ? "#c0c0c0" : "#cd7f32", color: i === 0 ? "#000" : "#fff" }}>{i + 1}</span>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: "0.82rem" }}>{s.m.email}</div>
+                          <div style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>
+                            {s.m.weeklyScores[0].week}: {s.first} → {s.m.weeklyScores[s.m.weeklyScores.length - 1].week}: {s.last}
+                          </div>
+                        </div>
+                        <span style={{ fontWeight: 700, color: s.diff >= 0 ? "#4ade80" : "#f87171", fontSize: "0.88rem" }}>{s.diff >= 0 ? "+" : ""}{Math.round(s.diff * 10) / 10} điểm</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
 // ─── Team report view ─────────────────────────────────────────────────────────
 
 function TeamReportView({ from, to, userId }: { from: string; to: string; userId: string }) {
@@ -815,7 +1179,7 @@ function ReportPageInner() {
   const [from, setFrom] = useState(daysAgo(30));
   const [to, setTo] = useState(today());
   const [userId, setUserId] = useState(defaultUserId);
-  const [tab, setTab] = useState<"team" | "project">("team");
+  const [tab, setTab] = useState<"team" | "project" | "quality">("team");
 
   useEffect(() => {
     if (!defaultUserId) {
@@ -875,19 +1239,21 @@ function ReportPageInner() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem" }}>
+      <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
         <button style={tabStyle(tab === "team")} onClick={() => setTab("team")}>
           👥 Team Report
         </button>
         <button style={tabStyle(tab === "project")} onClick={() => setTab("project")}>
           📁 Project Report
         </button>
+        <button style={tabStyle(tab === "quality")} onClick={() => setTab("quality")}>
+          📊 Prompt Quality
+        </button>
       </div>
 
-      {tab === "team"
-        ? <TeamReportView from={from} to={to} userId={userId} />
-        : <ProjectReportView from={from} to={to} userId={userId} />
-      }
+      {tab === "team" && <TeamReportView from={from} to={to} userId={userId} />}
+      {tab === "project" && <ProjectReportView from={from} to={to} userId={userId} />}
+      {tab === "quality" && <PromptQualityView from={from} to={to} userId={userId} />}
     </div>
   );
 }
