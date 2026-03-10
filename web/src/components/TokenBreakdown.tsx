@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAutoRefresh } from "@/lib/useAutoRefresh";
 
 interface Breakdown {
   input: number;
@@ -17,6 +18,7 @@ const EMPTY: Breakdown = {
 
 export function TokenBreakdown() {
   const [data, setData] = useState<Breakdown>(EMPTY);
+  const tick = useAutoRefresh(15_000);
 
   useEffect(() => {
     const uuid = localStorage.getItem("claude-reporter-uuid");
@@ -32,7 +34,7 @@ export function TokenBreakdown() {
         isPersonal: !!uuid,
       }))
       .catch(() => {});
-  }, []);
+  }, [tick]);
 
   const items = [
     { label: "Input", value: data.input, color: "#6366f1" },

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Suspense } from "react";
+import { useAutoRefresh } from "@/lib/useAutoRefresh";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -390,9 +391,10 @@ function MemberCard({ member, rank, maxTokens, maxPrompts }: {
 function TeamReportView({ from, to, userId }: { from: string; to: string; userId: string }) {
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [report, setReport] = useState<TeamReportData | null>(null);
+  const tick = useAutoRefresh(60_000);
 
   async function generate() {
-    setStatus("loading"); setReport(null);
+    setStatus("loading");
     try {
       const qs = new URLSearchParams({ from, to, ...(userId ? { userId } : {}) });
       const res = await fetch(`/api/report/team?${qs}`);
@@ -400,6 +402,11 @@ function TeamReportView({ from, to, userId }: { from: string; to: string; userId
       setReport(data); setStatus("done");
     } catch { setStatus("error"); }
   }
+
+  // Auto-load on mount and when date range / userId changes
+  useEffect(() => { generate(); }, [from, to, userId]);
+  // Auto-refresh on socket event / interval (only if already loaded)
+  useEffect(() => { if (status === "done") generate(); }, [tick]);
 
   const maxTokens = Math.max(...(report?.members.map((m) => m.totalTokens) ?? [1]));
   const maxPrompts = Math.max(...(report?.members.map((m) => m.totalPrompts) ?? [1]));
@@ -503,11 +510,12 @@ function ProjectReportView({ from, to, userId }: { from: string; to: string; use
   const [visibleProjects, setVisibleProjects] = useState<number>(0);
   const [currentProject, setCurrentProject] = useState<string>("");
   const timerRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const tick = useAutoRefresh(60_000);
 
   useEffect(() => () => { timerRef.current.forEach(clearTimeout); }, []);
 
   async function generate() {
-    setStatus("loading"); setReport(null); setVisibleProjects(0);
+    setStatus("loading"); setVisibleProjects(0);
     timerRef.current.forEach(clearTimeout); timerRef.current = [];
     try {
       const qs = new URLSearchParams({ from, to, ...(userId ? { userId } : {}) });
@@ -523,6 +531,11 @@ function ProjectReportView({ from, to, userId }: { from: string; to: string; use
       });
     } catch { setStatus("error"); }
   }
+
+  // Auto-load on mount and when date range / userId changes
+  useEffect(() => { generate(); }, [from, to, userId]);
+  // Auto-refresh on socket event / interval (only if already loaded)
+  useEffect(() => { if (status === "done") generate(); }, [tick]);
 
   return (
     <>

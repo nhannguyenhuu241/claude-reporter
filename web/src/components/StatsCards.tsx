@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAutoRefresh } from "@/lib/useAutoRefresh";
 
 interface Stats {
   totalSessions: number;
@@ -34,6 +35,7 @@ const EMPTY: Stats = {
 export function StatsCards() {
   const [stats, setStats] = useState<Stats>(EMPTY);
   const [isPersonal, setIsPersonal] = useState(false);
+  const tick = useAutoRefresh(15_000);
 
   useEffect(() => {
     const uuid = localStorage.getItem("claude-reporter-uuid");
@@ -43,7 +45,7 @@ export function StatsCards() {
       .then((r) => r.json())
       .then((d) => setStats(d))
       .catch(() => {});
-  }, []);
+  }, [tick]);
 
   const cards = [
     {
