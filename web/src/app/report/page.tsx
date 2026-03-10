@@ -442,7 +442,7 @@ function GeminiAnalysis({ reportData, reportType }: { reportData: unknown; repor
     <div className="card" style={{ marginTop: "1.5rem", border: "1px solid rgba(99,102,241,0.3)", background: "rgba(99,102,241,0.04)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
         <span style={{ fontSize: "1rem" }}>✨</span>
-        <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "#6366f1" }}>AI Analysis</span>
+        <span style={{ fontWeight: 700, fontSize: "0.9rem", color: "#6366f1" }}>Báo cáo phân tích</span>
         {status === "loading" && (
           <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>Đang phân tích…</span>
         )}
