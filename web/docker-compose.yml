@@ -14,4 +14,5 @@ services:
       - DATABASE_URL=file:/app/data/claude-reporter.db
       - ADMIN_EMAIL=admin@gmail.com
       - ADMIN_PASSWORD=admin123
+      - GEMINI_API_KEY=AIzaSyBQdJhfItzkjPgbg5FPgYYb8piNkS0sVpk
       # - HOOK_SECRET=your-secret-here
