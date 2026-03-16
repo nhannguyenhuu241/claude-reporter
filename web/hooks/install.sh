@@ -14,6 +14,27 @@ echo "📦 Claude Reporter Hook Installer"
 echo "   Server : $SERVER_URL"
 echo ""
 
+# ── Check & install dependencies ─────────────────────────────────────────────
+_need_apt=()
+command -v curl   >/dev/null 2>&1 || _need_apt+=(curl)
+command -v python3 >/dev/null 2>&1 || _need_apt+=(python3)
+
+if [[ ${#_need_apt[@]} -gt 0 ]]; then
+  echo "⚠️  Missing: ${_need_apt[*]}"
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "   → Installing via apt-get..."
+    sudo apt-get update -qq && sudo apt-get install -y -qq "${_need_apt[@]}"
+    echo "✅ Dependencies installed"
+  elif command -v apt >/dev/null 2>&1; then
+    sudo apt update -qq && sudo apt install -y -qq "${_need_apt[@]}"
+    echo "✅ Dependencies installed"
+  else
+    echo "   → apt not found. Install manually: ${_need_apt[*]}"
+    echo "   → On Debian/Ubuntu: sudo apt install ${_need_apt[*]}"
+    exit 1
+  fi
+fi
+
 # 1. Install hook script
 mkdir -p "$HOOKS_DIR"
 sed "s|https://vibe-mcp.onebot.meobeo.ai|$SERVER_URL|g" "$SCRIPT_SRC" \
