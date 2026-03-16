@@ -52,10 +52,14 @@ export async function PATCH(
     });
     return NextResponse.json({ user });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes("Unique constraint") || msg.includes("unique")) {
+    const code = (err as { code?: string }).code;
+    if (code === "P2002") {
       return NextResponse.json({ error: "Email already in use" }, { status: 409 });
     }
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (code === "P2025") {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+    console.error("[admin/users] update error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

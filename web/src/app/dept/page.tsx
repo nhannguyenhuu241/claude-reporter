@@ -3,6 +3,7 @@
 import { useEffect, useState, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { SessionList } from "@/components/SessionList";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -183,7 +184,6 @@ function MemberDetail({ m }: { m: Member }) {
 
 function DeptPageInner() {
   const router = useRouter();
-  const [uuid, setUuid] = useState<string | null>(null);
   const [userInfo, setUserInfo] = useState<{ email: string; role: string; department: { id: string; name: string } | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [from, setFrom] = useState(daysAgo(30));
@@ -191,32 +191,35 @@ function DeptPageInner() {
   const [report, setReport] = useState<TeamReportData | null>(null);
   const [reportStatus, setReportStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [expandedMember, setExpandedMember] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem("claude-reporter-uuid");
-    if (!stored) { router.replace("/login"); return; }
-    setUuid(stored);
-
-    fetch(`/api/auth/verify/${stored}`)
+    // Middleware already guards this page — just fetch user info from cookie
+    fetch("/api/auth/me")
       .then((r) => r.json())
       .then((d) => {
         if (!d.valid) { router.replace("/login"); return; }
-        if (d.role === "member") { router.replace("/"); return; }
-        setUserInfo({ email: d.email, role: d.role, department: d.department });
+        setUserInfo({ email: d.email, role: d.role, department: d.department ?? null });
         setLoading(false);
       })
       .catch(() => router.replace("/login"));
   }, [router]);
 
   async function generateReport() {
-    if (!uuid) return;
-    setReportStatus("loading"); setReport(null);
+    setReportStatus("loading"); setReport(null); setReportError(null);
     try {
-      const qs = new URLSearchParams({ from, to, deptHeadUuid: uuid });
+      const qs = new URLSearchParams({ from, to });
       const res = await fetch(`/api/report/team?${qs}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
       const data: TeamReportData = await res.json();
       setReport(data); setReportStatus("done");
-    } catch { setReportStatus("error"); }
+    } catch (e) {
+      setReportError(e instanceof Error ? e.message : "Lỗi không xác định");
+      setReportStatus("error");
+    }
   }
 
   if (loading) return null;
@@ -248,6 +251,9 @@ function DeptPageInner() {
           </Link>
         </div>
       </div>
+
+      {/* Live sessions of department members */}
+      <div style={{ marginBottom: "1rem" }}><SessionList /></div>
 
       {/* Controls */}
       <div className="card" style={{ marginBottom: "1rem", padding: "1rem" }}>
@@ -291,7 +297,15 @@ function DeptPageInner() {
       )}
 
       {reportStatus === "error" && (
-        <div className="card" style={{ color: "var(--red)", textAlign: "center" }}>Có lỗi. Thử lại nhé.</div>
+        <div className="card" style={{ color: "var(--red)", textAlign: "center", padding: "1.25rem" }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Không thể tải báo cáo</div>
+          {reportError && <div style={{ fontSize: "0.8rem", opacity: 0.8 }}>{reportError}</div>}
+          {reportError?.includes("no department") && (
+            <div style={{ fontSize: "0.78rem", marginTop: 8, color: "var(--text-muted)" }}>
+              Liên hệ admin để được gán vào phòng ban tại trang <strong>/admin</strong>.
+            </div>
+          )}
+        </div>
       )}
 
       {reportStatus === "done" && report && (

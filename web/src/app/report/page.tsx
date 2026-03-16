@@ -545,7 +545,7 @@ function MemberPQCard({ m, rank }: { m: PQMember; rank: number }) {
   );
 }
 
-function PromptQualityView({ from, to, userId }: { from: string; to: string; userId: string }) {
+function PromptQualityView({ from, to }: { from: string; to: string }) {
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [data, setData] = useState<PQData | null>(null);
   const tick = useAutoRefresh(60_000);
@@ -553,14 +553,14 @@ function PromptQualityView({ from, to, userId }: { from: string; to: string; use
   async function load() {
     setStatus("loading");
     try {
-      const qs = new URLSearchParams({ from, to, ...(userId ? { userId } : {}) });
+      const qs = new URLSearchParams({ from, to });
       const res = await fetch(`/api/report/prompt-quality?${qs}`);
       const json: PQData = await res.json();
       setData(json); setStatus("done");
     } catch { setStatus("error"); }
   }
 
-  useEffect(() => { load(); }, [from, to, userId]);
+  useEffect(() => { load(); }, [from, to]);
   useEffect(() => { if (status === "done") load(); }, [tick]);
 
   const firstScore = data?.weeklyTrend[0]?.score ?? 0;
@@ -753,7 +753,7 @@ function PromptQualityView({ from, to, userId }: { from: string; to: string; use
 
 // ─── Team report view ─────────────────────────────────────────────────────────
 
-function TeamReportView({ from, to, userId }: { from: string; to: string; userId: string }) {
+function TeamReportView({ from, to }: { from: string; to: string }) {
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [report, setReport] = useState<TeamReportData | null>(null);
   const tick = useAutoRefresh(60_000);
@@ -761,7 +761,7 @@ function TeamReportView({ from, to, userId }: { from: string; to: string; userId
   async function generate() {
     setStatus("loading");
     try {
-      const qs = new URLSearchParams({ from, to, ...(userId ? { userId } : {}) });
+      const qs = new URLSearchParams({ from, to });
       const res = await fetch(`/api/report/team?${qs}`);
       const data: TeamReportData = await res.json();
       setReport(data); setStatus("done");
@@ -769,7 +769,7 @@ function TeamReportView({ from, to, userId }: { from: string; to: string; userId
   }
 
   // Auto-load on mount and when date range / userId changes
-  useEffect(() => { generate(); }, [from, to, userId]);
+  useEffect(() => { generate(); }, [from, to]);
   // Auto-refresh on socket event / interval (only if already loaded)
   useEffect(() => { if (status === "done") generate(); }, [tick]);
 
@@ -870,7 +870,7 @@ function TeamReportView({ from, to, userId }: { from: string; to: string; userId
 
 // ─── Project report view (existing) ──────────────────────────────────────────
 
-function ProjectReportView({ from, to, userId }: { from: string; to: string; userId: string }) {
+function ProjectReportView({ from, to }: { from: string; to: string }) {
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [report, setReport] = useState<ReportData | null>(null);
   const [visibleProjects, setVisibleProjects] = useState<number>(0);
@@ -884,7 +884,7 @@ function ProjectReportView({ from, to, userId }: { from: string; to: string; use
     setStatus("loading"); setVisibleProjects(0);
     timerRef.current.forEach(clearTimeout); timerRef.current = [];
     try {
-      const qs = new URLSearchParams({ from, to, ...(userId ? { userId } : {}) });
+      const qs = new URLSearchParams({ from, to });
       const res = await fetch(`/api/report?${qs}`);
       const data: ReportData = await res.json();
       setReport(data); setStatus("done");
@@ -899,7 +899,7 @@ function ProjectReportView({ from, to, userId }: { from: string; to: string; use
   }
 
   // Auto-load on mount and when date range / userId changes
-  useEffect(() => { generate(); }, [from, to, userId]);
+  useEffect(() => { generate(); }, [from, to]);
   // Auto-refresh on socket event / interval (only if already loaded)
   useEffect(() => { if (status === "done") generate(); }, [tick]);
 
@@ -1040,19 +1040,19 @@ function ProjectReportView({ from, to, userId }: { from: string; to: string; use
 
 function ReportPageInner() {
   const searchParams = useSearchParams();
-  const defaultUserId = searchParams.get("userId") ?? "";
-
   const [from, setFrom] = useState(daysAgo(30));
   const [to, setTo] = useState(today());
-  const [userId, setUserId] = useState(defaultUserId);
+  const [activePreset, setActivePreset] = useState<number | null>(30);
   const [tab, setTab] = useState<"team" | "project" | "quality">("team");
+  const [userRole, setUserRole] = useState<string>("member");
 
   useEffect(() => {
-    if (!defaultUserId) {
-      const stored = localStorage.getItem("claude-reporter-uuid");
-      if (stored) setUserId(stored);
-    }
-  }, [defaultUserId]);
+    const role = localStorage.getItem("claude-reporter-role") ?? "member";
+    setUserRole(role);
+  }, []);
+
+  // Team Report tab only for admin and dept_head
+  const canSeeTeamReport = userRole === "admin" || userRole === "dept_head";
 
   const inputStyle: React.CSSProperties = {
     background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6,
@@ -1084,18 +1084,18 @@ function ReportPageInner() {
         <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", alignItems: "flex-end" }}>
           <div>
             <div style={{ color: "var(--text-muted)", fontSize: "0.72rem", marginBottom: 4 }}>Từ ngày</div>
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={inputStyle} />
+            <input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setActivePreset(null); }} style={inputStyle} />
           </div>
           <div>
             <div style={{ color: "var(--text-muted)", fontSize: "0.72rem", marginBottom: 4 }}>Đến ngày</div>
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={inputStyle} />
+            <input type="date" value={to} onChange={(e) => { setTo(e.target.value); setActivePreset(null); }} style={inputStyle} />
           </div>
           <div>
             <div style={{ color: "var(--text-muted)", fontSize: "0.72rem", marginBottom: 4 }}>Nhanh</div>
             <div style={{ display: "flex", gap: "0.3rem" }}>
               {[{ label: "7d", days: 7 }, { label: "30d", days: 30 }, { label: "90d", days: 90 }].map((r) => (
-                <button key={r.label} onClick={() => { setFrom(daysAgo(r.days)); setTo(today()); }}
-                  style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 5, padding: "2px 8px", fontSize: "0.72rem", color: "var(--text-muted)", cursor: "pointer" }}>
+                <button key={r.label} onClick={() => { setActivePreset(r.days); setFrom(daysAgo(r.days)); setTo(today()); }}
+                  style={{ background: activePreset === r.days ? "var(--accent)" : "var(--surface)", border: "1px solid var(--border)", borderRadius: 5, padding: "2px 8px", fontSize: "0.72rem", color: activePreset === r.days ? "#fff" : "var(--text-muted)", cursor: "pointer", fontWeight: activePreset === r.days ? 600 : 400 }}>
                   {r.label}
                 </button>
               ))}
@@ -1107,19 +1107,21 @@ function ReportPageInner() {
       {/* Tabs */}
       <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
         <button style={tabStyle(tab === "team")} onClick={() => setTab("team")}>
-          👥 Team Report
+          👤 My Report
         </button>
         <button style={tabStyle(tab === "project")} onClick={() => setTab("project")}>
           📁 Project Report
         </button>
-        <button style={tabStyle(tab === "quality")} onClick={() => setTab("quality")}>
-          📊 Prompt Quality
-        </button>
+        {canSeeTeamReport && (
+          <button style={tabStyle(tab === "quality")} onClick={() => setTab("quality")}>
+            👥 Team Report
+          </button>
+        )}
       </div>
 
-      {tab === "team" && <TeamReportView from={from} to={to} userId={userId} />}
-      {tab === "project" && <ProjectReportView from={from} to={to} userId={userId} />}
-      {tab === "quality" && <PromptQualityView from={from} to={to} userId={userId} />}
+      {tab === "team" && <TeamReportView from={from} to={to} />}
+      {tab === "project" && <ProjectReportView from={from} to={to} />}
+      {tab === "quality" && canSeeTeamReport && <PromptQualityView from={from} to={to} />}
     </div>
   );
 }

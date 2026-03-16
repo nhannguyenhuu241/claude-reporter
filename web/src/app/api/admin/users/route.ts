@@ -1,64 +1,85 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkAdminAuth } from "@/lib/adminAuth";
-
-function calcCost(i: number, o: number, cc: number, cr: number) {
-  return (i * 3 + o * 15 + cc * 3.75 + cr * 0.3) / 1_000_000;
-}
+import { calcCost, projectName } from "@/lib/reportUtils";
 
 export async function GET(req: NextRequest) {
   if (!checkAdminAuth(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const users = await prisma.user.findMany({
-    include: {
-      department: { select: { id: true, name: true } },
-      _count: { select: { sessions: true } },
-      sessions: {
-        select: {
-          id: true,
-          inputTokens: true,
-          outputTokens: true,
-          cacheCreationTokens: true,
-          cacheReadTokens: true,
-          projectPath: true,
-          startedAt: true,
-          status: true,
-          _count: { select: { events: true } },
-        },
+  // Single query: aggregate tokens in SQL, avoid loading all sessions into JS
+  const [users, tokenAggs, eventAggs, projectAggs, anonymousSessions] = await Promise.all([
+    prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        createdAt: true,
+        role: true,
+        department: { select: { id: true, name: true } },
+        _count: { select: { sessions: true } },
       },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+      orderBy: { createdAt: "desc" },
+    }),
+
+    // Token sums per user — let PostgreSQL do the aggregation
+    prisma.session.groupBy({
+      by: ["userId"],
+      _sum: {
+        inputTokens: true,
+        outputTokens: true,
+        cacheCreationTokens: true,
+        cacheReadTokens: true,
+      },
+    }),
+
+    // Total event count per user (via session join)
+    prisma.$queryRaw<{ user_id: string; event_count: bigint }[]>`
+      SELECT s.user_id, COUNT(e.id) AS event_count
+      FROM sessions s
+      LEFT JOIN events e ON e.session_id = s.id
+      WHERE s.user_id IS NOT NULL
+      GROUP BY s.user_id
+    `,
+
+    // Distinct project paths + last active per user
+    prisma.session.groupBy({
+      by: ["userId", "projectPath"],
+      _max: { startedAt: true },
+      where: { userId: { not: null }, projectPath: { not: null } },
+    }),
+
+    prisma.session.count({ where: { userId: null } }),
+  ]);
+
+  // Build lookup maps from aggregated results
+  const tokenMap = new Map(
+    tokenAggs.map((r) => [r.userId, r._sum])
+  );
+  const eventMap = new Map(
+    eventAggs.map((r) => [r.user_id, Number(r.event_count)])
+  );
+
+  // Group project paths and last active by userId
+  const projectMap = new Map<string, { paths: string[]; lastActive: Date | null }>();
+  for (const r of projectAggs) {
+    const uid = r.userId!;
+    if (!projectMap.has(uid)) projectMap.set(uid, { paths: [], lastActive: null });
+    const entry = projectMap.get(uid)!;
+    entry.paths.push(r.projectPath!);
+    const ts = r._max.startedAt;
+    if (ts && (!entry.lastActive || ts > entry.lastActive)) entry.lastActive = ts;
+  }
 
   const result = users.map((u) => {
-    const tokens = u.sessions.reduce(
-      (acc, s) => ({
-        input: acc.input + s.inputTokens,
-        output: acc.output + s.outputTokens,
-        cacheCreation: acc.cacheCreation + s.cacheCreationTokens,
-        cacheRead: acc.cacheRead + s.cacheReadTokens,
-      }),
-      { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 }
-    );
+    const tok = tokenMap.get(u.id);
+    const inp = tok?.inputTokens ?? 0;
+    const out = tok?.outputTokens ?? 0;
+    const cc = tok?.cacheCreationTokens ?? 0;
+    const cr = tok?.cacheReadTokens ?? 0;
 
-    const totalTokens = tokens.input + tokens.output + tokens.cacheCreation + tokens.cacheRead;
-    const totalEvents = u.sessions.reduce((s, sess) => s + sess._count.events, 0);
-    const cost = calcCost(tokens.input, tokens.output, tokens.cacheCreation, tokens.cacheRead);
-
-    const projects = [
-      ...new Set(
-        u.sessions
-          .map((s) => s.projectPath?.split("/").filter(Boolean).pop())
-          .filter(Boolean)
-      ),
-    ].slice(0, 6);
-
-    const activeSessions = u.sessions.filter((s) => s.status === "active").length;
-    const lastSession = u.sessions.length
-      ? u.sessions.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0]
-      : null;
+    const proj = projectMap.get(u.id);
+    const projects = [...new Set((proj?.paths ?? []).map(projectName))].slice(0, 6);
 
     return {
       id: u.id,
@@ -67,16 +88,13 @@ export async function GET(req: NextRequest) {
       role: u.role,
       department: u.department,
       totalSessions: u._count.sessions,
-      activeSessions,
-      totalEvents,
-      totalTokens,
-      estimatedCostUsd: Math.round(cost * 100) / 100,
+      totalEvents: eventMap.get(u.id) ?? 0,
+      totalTokens: inp + out + cc + cr,
+      estimatedCostUsd: Math.round(calcCost(inp, out, cc, cr) * 100) / 100,
       projects,
-      lastActiveAt: lastSession?.startedAt ?? null,
+      lastActiveAt: proj?.lastActive ?? null,
     };
   });
-
-  const anonymousSessions = await prisma.session.count({ where: { userId: null } });
 
   return NextResponse.json({ users: result, total: result.length, anonymousSessions });
 }

@@ -1,23 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkAdminAuth } from "@/lib/adminAuth";
-
-function calcCost(input: number, output: number, cacheCreate: number, cacheRead: number) {
-  return (input * 3 + output * 15 + cacheCreate * 3.75 + cacheRead * 0.3) / 1_000_000;
-}
-
-function getISOWeek(date: Date): string {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
-  const week1 = new Date(d.getFullYear(), 0, 4);
-  const weekNum =
-    1 +
-    Math.round(
-      ((d.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7
-    );
-  return `${d.getFullYear()}-W${String(weekNum).padStart(2, "0")}`;
-}
+import { getUserSession } from "@/lib/userAuth";
+import { calcCost, getISOWeek, parseDateRange } from "@/lib/reportUtils";
 
 /** Prompts tự động từ IDE/system — không phải prompt thực của user */
 function isNoisePrompt(prompt: string): boolean {
@@ -36,46 +21,36 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const fromStr = searchParams.get("from");
   const toStr = searchParams.get("to");
-  const filterUserId = searchParams.get("userId") ?? null;
-  const deptHeadUuid = searchParams.get("deptHeadUuid") ?? null;
   const isAdmin = checkAdminAuth(req);
+  const userSession = getUserSession(req);
 
-  const from = fromStr
-    ? new Date(fromStr + "T00:00:00.000Z")
-    : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const to = toStr ? new Date(toStr + "T23:59:59.999Z") : new Date();
+  const { from, to } = parseDateRange(fromStr, toStr);
 
-  // Dept head: verify UUID and get their department
-  let deptFilter: { departmentId: string } | null = null;
-  if (!isAdmin && deptHeadUuid) {
-    const deptHead = await prisma.user.findUnique({
-      where: { id: deptHeadUuid },
-      select: { role: true, departmentId: true },
-    });
-    if (!deptHead || deptHead.role !== "dept_head" || !deptHead.departmentId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
-    }
-    deptFilter = { departmentId: deptHead.departmentId };
-  }
-
-  // Build session filter
+  // Build session filter based on cookie auth
   let userFilter: Record<string, unknown> = {};
   if (isAdmin) {
+    // Admin: optional ?userId= to drill into one member
+    const filterUserId = searchParams.get("userId") ?? null;
     userFilter = filterUserId ? { userId: filterUserId } : {};
-  } else if (deptFilter) {
-    // Filter sessions whose user belongs to this department
+  } else if (userSession?.role === "dept_head" && userSession.departmentId) {
+    // Dept head: scope to their department
     const deptUsers = await prisma.user.findMany({
-      where: deptFilter,
+      where: { departmentId: userSession.departmentId },
       select: { id: true },
     });
-    const deptUserIds = deptUsers.map((u) => u.id);
-    userFilter = { userId: { in: deptUserIds } };
-  } else if (filterUserId) {
-    userFilter = { userId: filterUserId };
+    userFilter = { userId: { in: deptUsers.map((u) => u.id) } };
+  } else if (!userSession) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  } else {
+    // Regular member cannot see team report
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  // Cap sessions to prevent OOM. Narrowing the date range gives complete data.
   const sessions = await prisma.session.findMany({
     where: { startedAt: { gte: from, lte: to }, ...userFilter as object },
+    orderBy: { startedAt: "desc" },
+    take: 5_000,
     include: { user: { select: { id: true, email: true } } },
   });
 
@@ -88,11 +63,19 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const promptEvents = await prisma.event.findMany({
-    where: { sessionId: { in: sessionIds }, eventType: "user_prompt" },
+  // Fetch prompts using the time range + eventType index instead of a huge IN clause.
+  // Then filter in-memory to the sessions we actually loaded — avoids Postgres
+  // performance cliff when IN has thousands of items.
+  const sessionSet = new Set(sessionIds);
+  const promptEvents = (await prisma.event.findMany({
+    where: {
+      eventType: "user_prompt",
+      timestamp: { gte: from, lte: to },
+    },
     select: { sessionId: true, userPrompt: true, timestamp: true },
     orderBy: { timestamp: "asc" },
-  });
+    take: 50_000, // safety cap
+  })).filter((e) => sessionSet.has(e.sessionId));
 
   const sessionMap = new Map(sessions.map((s) => [s.id, s]));
 

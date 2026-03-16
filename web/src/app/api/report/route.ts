@@ -1,32 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-
-function calcCost(input: number, output: number, cacheCreate: number, cacheRead: number) {
-  return (input * 3 + output * 15 + cacheCreate * 3.75 + cacheRead * 0.3) / 1_000_000;
-}
+import { calcCost, projectName, parseDateRange, resolveDeptScope } from "@/lib/reportUtils";
+import { checkRateLimit } from "@/lib/rateLimiter";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const fromStr = searchParams.get("from");
-  const toStr = searchParams.get("to");
-  const userId = searchParams.get("userId") ?? null;
-
-  const from = fromStr ? new Date(fromStr + "T00:00:00.000Z") : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const to = toStr ? new Date(toStr + "T23:59:59.999Z") : new Date();
-
-  // Validate userId if provided
-  if (userId) {
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
-    if (!user) {
-      return NextResponse.json({ from: from.toISOString(), to: to.toISOString(), totalSessions: 0, totalTokens: 0, totalEvents: 0, estimatedCostUsd: 0, projects: [] });
-    }
+  // Use x-real-ip (set by nginx/proxy) when available; x-forwarded-for is client-spoofable.
+  // Also bind to userId/deptHeadUuid so rotating IPs doesn't bypass per-user limits.
+  const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for") ?? "anon";
+  if (!checkRateLimit(`report:proj:${ip}`, 10)) {
+    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
   }
 
+  const { from, to } = parseDateRange(searchParams.get("from"), searchParams.get("to"));
+  const { userIds, error } = await resolveDeptScope(req);
+  if (error) return NextResponse.json({ error }, { status: 401 });
+
+  const sessionWhere: Record<string, unknown> = { startedAt: { gte: from, lte: to } };
+  if (userIds !== null) {
+    sessionWhere.userId = userIds.length === 0 ? "__none__" : { in: userIds };
+  }
+
+  // Cap at 10 000 sessions to prevent OOM on large deployments.
+  // For an accurate aggregate over a very wide date range, narrow the range or use the admin DB directly.
   const sessions = await prisma.session.findMany({
-    where: {
-      startedAt: { gte: from, lte: to },
-      ...(userId ? { userId } : {}),
-    },
+    where: sessionWhere,
+    orderBy: { startedAt: "desc" },
+    take: 10_000,
     include: {
       _count: { select: { events: true } },
       user: { select: { email: true } },
@@ -51,14 +51,12 @@ export async function GET(req: NextRequest) {
 
   for (const s of sessions) {
     const projectPath = s.projectPath ?? "";
-    const projectName = projectPath
-      ? projectPath.split("/").filter(Boolean).pop() ?? "Unknown"
-      : "Unknown";
+    const pName = projectName(projectPath);
     const key = projectPath || "__unknown__";
 
     if (!projectMap.has(key)) {
       projectMap.set(key, {
-        name: projectName,
+        name: pName,
         path: projectPath,
         sessions: 0,
         events: 0,
@@ -112,6 +110,7 @@ export async function GET(req: NextRequest) {
     from: from.toISOString(),
     to: to.toISOString(),
     totalSessions: sessions.length,
+    capped: sessions.length === 10_000, // true → result may be incomplete; narrow date range
     totalTokens,
     totalEvents,
     estimatedCostUsd: Math.round(totalCost * 100) / 100,

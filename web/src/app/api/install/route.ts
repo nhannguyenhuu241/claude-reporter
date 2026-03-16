@@ -15,6 +15,28 @@ SETTINGS="$HOME/.claude/settings.json"
 HOOK_SCRIPT="$HOOKS_DIR/claude-reporter.sh"
 
 echo "📦 Installing Claude Reporter hook..."
+
+# ── Check & install dependencies ─────────────────────────────────────────────
+_need_apt=()
+command -v curl    >/dev/null 2>&1 || _need_apt+=(curl)
+command -v python3 >/dev/null 2>&1 || _need_apt+=(python3)
+
+if [[ \${#_need_apt[@]} -gt 0 ]]; then
+  echo "⚠️  Missing: \${_need_apt[*]}"
+  if command -v apt-get >/dev/null 2>&1; then
+    echo "   → Installing via apt-get..."
+    sudo apt-get update -qq && sudo apt-get install -y -qq "\${_need_apt[@]}"
+    echo "✅ Dependencies installed"
+  elif command -v apt >/dev/null 2>&1; then
+    sudo apt update -qq && sudo apt install -y -qq "\${_need_apt[@]}"
+    echo "✅ Dependencies installed"
+  else
+    echo "   → apt not found. Install manually: \${_need_apt[*]}"
+    echo "   → On Debian/Ubuntu: sudo apt install \${_need_apt[*]}"
+    exit 1
+  fi
+fi
+
 mkdir -p "$HOOKS_DIR"
 
 # Download the hook script and embed the server URL
@@ -67,6 +89,13 @@ fi
 
 echo ""
 echo "🎉 Done! Restart Claude Code to start capturing sessions."
+echo ""
+echo "💡 Missed sessions? Replay all historical transcripts:"
+echo "   curl -s $SERVER_URL/hooks/reporter-replay.sh > /tmp/replay.sh && bash /tmp/replay.sh"
+echo "   # or with date filter:"
+echo "   bash /tmp/replay.sh --days 30"
+echo "   # dry-run first (no data sent):"
+echo "   bash /tmp/replay.sh --dry-run"
 `;
 
   return new NextResponse(script, {

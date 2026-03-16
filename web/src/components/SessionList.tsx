@@ -71,7 +71,7 @@ function ProjectBlock({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const name = projectName(projectKey === "__none__" ? null : projectKey);
-  const totalTokens = sessions.reduce((s, x) => s + x.inputTokens + x.outputTokens, 0);
+  const totalTokens = sessions.reduce((s, x) => s + (x.inputTokens ?? 0) + (x.outputTokens ?? 0), 0);
   const activeCount = sessions.filter((x) => x.status === "active").length;
 
   return (
@@ -129,7 +129,7 @@ function ProjectBlock({
                   )}
                   <td style={{ padding: "5px 8px" }}><span className={`badge badge-${s.status}`}>{s.status}</span></td>
                   <td style={{ padding: "5px 8px", textAlign: "right" }}>{s._count.events}</td>
-                  <td style={{ padding: "5px 8px", textAlign: "right", color: "var(--yellow)" }}>{fmt(s.inputTokens + s.outputTokens)}</td>
+                  <td style={{ padding: "5px 8px", textAlign: "right", color: "var(--yellow)" }}>{fmt((s.inputTokens ?? 0) + (s.outputTokens ?? 0))}</td>
                   <td style={{ padding: "5px 8px", textAlign: "right", color: "var(--text-muted)" }}>{relativeTime(s.startedAt)}</td>
                 </tr>
               ))}
@@ -149,7 +149,7 @@ function UserBlock({ userId, email, sessions, updatedIds }: {
   updatedIds: Set<string>;
 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const totalTokens = sessions.reduce((s, x) => s + x.inputTokens + x.outputTokens, 0);
+  const totalTokens = sessions.reduce((s, x) => s + (x.inputTokens ?? 0) + (x.outputTokens ?? 0), 0);
   const activeCount = sessions.filter((x) => x.status === "active").length;
   const projectGroups = groupByProject(sessions);
   const displayName = email ? email.split("@")[0] : "anon";
@@ -198,43 +198,71 @@ function UserBlock({ userId, email, sessions, updatedIds }: {
 export function SessionList({ adminMode = false }: { adminMode?: boolean }) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [updatedIds, setUpdatedIds] = useState<Set<string>>(new Set());
-  const [myUuid, setMyUuid] = useState<string | null>(null);
-  const myUuidRef = useRef<string | null>(null);
+  const [wsStatus, setWsStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
+  const [role, setRole] = useState<string>("member");
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Determine display mode from cookie role (server scopes data automatically)
   useEffect(() => {
-    myUuidRef.current = myUuid;
-  }, [myUuid]);
-
-  useEffect(() => {
-    const uuid = localStorage.getItem("claude-reporter-uuid");
-    if (uuid) setMyUuid(uuid);
+    const stored = localStorage.getItem("claude-reporter-role") ?? "member";
+    setRole(stored);
   }, []);
 
-  async function load(userId?: string | null) {
-    const qs = userId ? `?limit=100&userId=${userId}` : "?limit=100";
-    const res = await fetch(`/api/sessions${qs}`);
-    const data = await res.json();
-    setSessions(data.sessions ?? []);
+  const isDeptMode = role === "dept_head";
+  const isGroupedMode = adminMode || isDeptMode;
+
+  async function load() {
+    const allSessions: Session[] = [];
+    let cursor: string | null = null;
+    try {
+      do {
+        const qs = new URLSearchParams({ limit: "100" });
+        if (cursor) qs.set("cursor", cursor);
+        // Cookie is sent automatically — server resolves scope
+        const res = await fetch(`/api/sessions?${qs}`);
+        if (!res.ok) break;
+        const data = await res.json();
+        allSessions.push(...(data.sessions ?? []));
+        cursor = data.nextCursor ?? null;
+      } while (cursor && allSessions.length < 500);
+      setSessions(allSessions);
+    } catch {
+      // Network error — keep existing sessions, will refresh on next reconnect
+    }
+  }
+
+  function scheduleReload() {
+    if (reloadTimer.current) clearTimeout(reloadTimer.current);
+    reloadTimer.current = setTimeout(() => load(), 400);
   }
 
   useEffect(() => {
-    if (!adminMode && !myUuid) return;
-    load(adminMode ? null : myUuid);
+    load();
 
-    const socket = io({ path: "/socket.io" });
-    socket.on("session_started", () => load(adminMode ? null : myUuidRef.current));
+    const socket = io({ path: "/socket.io", reconnectionDelayMax: 10_000 });
+
+    socket.on("connect", () => {
+      setWsStatus("connected");
+      load();
+    });
+    socket.on("disconnect", () => setWsStatus("disconnected"));
+    socket.on("connect_error", () => setWsStatus("disconnected"));
+
+    socket.on("session_started", () => scheduleReload());
     socket.on("session_updated", ({ sessionId }: { sessionId: string }) => {
       setUpdatedIds((prev) => new Set(Array.from(prev).concat(sessionId)));
       setTimeout(() => setUpdatedIds((prev) => { const n = new Set(prev); n.delete(sessionId); return n; }), 1500);
-      load(adminMode ? null : myUuidRef.current);
     });
 
-    return () => { socket.disconnect(); };
+    return () => {
+      socket.disconnect();
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [myUuid, adminMode]);
+  }, []);
 
-  // Group by user (admin) or by project (personal)
-  const userGroups = adminMode
+  // Group by user (admin/dept) or by project (personal)
+  const userGroups = isGroupedMode
     ? Object.entries(
         sessions.reduce((acc, s) => {
           const key = s.userId ?? "__anon__";
@@ -249,7 +277,7 @@ export function SessionList({ adminMode = false }: { adminMode?: boolean }) {
       })
     : null;
 
-  const projectGroups = !adminMode ? groupByProject(sessions) : null;
+  const projectGroups = !isGroupedMode ? groupByProject(sessions) : null;
 
   return (
     <div className="card">
@@ -258,9 +286,21 @@ export function SessionList({ adminMode = false }: { adminMode?: boolean }) {
           Sessions
           <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: "0.8rem", marginLeft: 8 }}>({sessions.length})</span>
         </span>
+        <span
+          title={wsStatus === "connected" ? "Real-time connected" : wsStatus === "connecting" ? "Connecting…" : "Disconnected — reconnecting"}
+          style={{
+            width: 7, height: 7, borderRadius: "50%", display: "inline-block", flexShrink: 0,
+            background: wsStatus === "connected" ? "var(--green)" : wsStatus === "connecting" ? "var(--yellow)" : "#ef4444",
+          }}
+        />
         {adminMode && (
           <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--text-muted)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 4, padding: "2px 8px" }}>
             All users
+          </span>
+        )}
+        {isDeptMode && (
+          <span style={{ marginLeft: "auto", fontSize: "0.72rem", color: "var(--text-muted)", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 4, padding: "2px 8px" }}>
+            Phòng ban
           </span>
         )}
       </div>
@@ -268,9 +308,9 @@ export function SessionList({ adminMode = false }: { adminMode?: boolean }) {
       {sessions.length === 0 ? (
         <div style={{ padding: "2rem", textAlign: "center" }}>
           <div style={{ color: "var(--text-muted)", marginBottom: 8 }}>
-            {adminMode ? "Chưa có session nào được ghi nhận." : "Chưa có session nào của bạn."}
+            {isGroupedMode ? "Chưa có session nào được ghi nhận." : "Chưa có session nào của bạn."}
           </div>
-          {!adminMode && (
+          {!isGroupedMode && (
             <div style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
               Đảm bảo đã cài hook và UUID trên máy — xem lại tại{" "}
               <Link href="/login" style={{ color: "var(--accent)", textDecoration: "none" }}>trang đăng ký</Link>
@@ -278,8 +318,8 @@ export function SessionList({ adminMode = false }: { adminMode?: boolean }) {
             </div>
           )}
         </div>
-      ) : adminMode && userGroups ? (
-        /* ── Admin: User → Project → Session ── */
+      ) : isGroupedMode && userGroups ? (
+        /* ── Admin/Dept: User → Project → Session ── */
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {userGroups.map(([userId, { email, sessions: uSessions }]) => (
             <UserBlock key={userId} userId={userId} email={email} sessions={uSessions} updatedIds={updatedIds} />

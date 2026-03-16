@@ -1,18 +1,68 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: claude-reporter-redis
+    restart: always
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: claude-reporter-db
+    restart: always
+    environment:
+      POSTGRES_DB: claude_reporter
+      POSTGRES_USER: reporter
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-reporter_secret}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reporter -d claude_reporter"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   claude-reporter:
     build: .
     image: claude-reporter:latest
     container_name: claude-reporter
     restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "3005:3005"
-    volumes:
-      - ./data:/app/data
     environment:
       - NODE_ENV=production
       - PORT=3005
-      - DATABASE_URL=file:/app/data/claude-reporter.db
-      - ADMIN_EMAIL=admin@gmail.com
-      - ADMIN_PASSWORD=admin123
-      - GEMINI_API_KEY=AIzaSyBQdJhfItzkjPgbg5FPgYYb8piNkS0sVpk
+      - DATABASE_URL=postgresql://reporter:${POSTGRES_PASSWORD:-reporter_secret}@postgres:5432/claude_reporter
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-admin@gmail.com}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - REDIS_URL=redis://claude-reporter-redis:6379
       # - HOOK_SECRET=your-secret-here
+
+  adminer:
+    image: adminer:latest
+    container_name: claude-reporter-adminer
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8088:8080"   # chỉ localhost — truy cập qua SSH tunnel
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+      ADMINER_DESIGN: pepa-linha-dark
+
+volumes:
+  postgres_data:
+  redis_data:

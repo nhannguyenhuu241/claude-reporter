@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { checkAdminAuth } from "@/lib/adminAuth";
+import { checkRateLimit } from "@/lib/rateLimiter";
+import { getUserSession } from "@/lib/userAuth";
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -7,40 +10,81 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "GEMINI_API_KEY not configured" }, { status: 503 });
   }
 
-  const body = await req.json();
-  const { reportData, reportType } = body as {
-    reportData: unknown;
-    reportType: "team" | "project";
-  };
+  const isAdmin = checkAdminAuth(req);
+  let body: { reportData?: unknown; reportType?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  const { reportData, reportType } = body;
+
+  // Require admin cookie OR authenticated user session
+  const userSession = getUserSession(req);
+  if (!isAdmin && !userSession) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const rateLimitKey = isAdmin
+    ? `analyze:admin:${req.headers.get("x-real-ip") ?? "admin"}`
+    : `analyze:${userSession!.userId}`;
+  const rateMax = isAdmin ? 20 : 5;
+  if (!checkRateLimit(rateLimitKey, 1, { max: rateMax, refillRate: rateMax, windowMs: 60 * 60_000 })) {
+    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+  }
+
+  // Validate reportType
+  if (reportType !== "team" && reportType !== "project") {
+    return NextResponse.json({ error: "Invalid reportType" }, { status: 400 });
+  }
+
+  // Guard against huge payloads / non-serializable data
+  let rawJson: string;
+  try {
+    rawJson = JSON.stringify(reportData);
+  } catch {
+    return NextResponse.json({ error: "Report data is not serializable" }, { status: 400 });
+  }
+  if (rawJson.length > 200_000) {
+    return NextResponse.json({ error: "Report data too large" }, { status: 413 });
+  }
 
   const prompt = buildPrompt(reportData, reportType);
 
   const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
   const genAI = new GoogleGenerativeAI(apiKey);
 
-  for (const modelName of models) {
-    try {
-      const model = genAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent(prompt);
-      const text = result.response.text();
-      return NextResponse.json({ analysis: text });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "";
-      // Extract retry delay from 429 response
-      const retryMatch = msg.match(/Please retry in ([\d.]+)s/);
-      const retryAfter = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) : null;
-      const is429 = msg.includes("429") || msg.includes("Too Many Requests") || msg.includes("quota");
-      if (is429) {
-        return NextResponse.json(
-          { error: "rate_limit", retryAfter: retryAfter ?? 60 },
-          { status: 429 }
-        );
-      }
-      // Other error — try next model
-      if (modelName === models[models.length - 1]) {
-        return NextResponse.json({ error: msg || "Unknown error" }, { status: 500 });
+  // Abort controller: cancel Gemini request after 45 s to prevent hanging threads
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 45_000);
+
+  try {
+    for (const modelName of models) {
+      try {
+        const model = genAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent(prompt);
+        clearTimeout(timeoutId);
+        const text = result.response.text();
+        return NextResponse.json({ analysis: text });
+      } catch (err: unknown) {
+        if ((err as { name?: string }).name === "AbortError") {
+          return NextResponse.json({ error: "Analysis timed out, try again" }, { status: 504 });
+        }
+        const msg = err instanceof Error ? err.message : "";
+        const retryMatch = msg.match(/Please retry in ([\d.]+)s/);
+        const retryAfter = retryMatch ? Math.ceil(parseFloat(retryMatch[1])) : null;
+        const is429 = msg.includes("429") || msg.includes("Too Many Requests") || msg.includes("quota");
+        if (is429) {
+          clearTimeout(timeoutId);
+          return NextResponse.json({ error: "rate_limit", retryAfter: retryAfter ?? 60 }, { status: 429 });
+        }
+        if (modelName === models[models.length - 1]) {
+          clearTimeout(timeoutId);
+          return NextResponse.json({ error: msg || "Unknown error" }, { status: 500 });
+        }
       }
     }
+  } finally {
+    clearTimeout(timeoutId);
   }
   return NextResponse.json({ error: "All models failed" }, { status: 500 });
 }

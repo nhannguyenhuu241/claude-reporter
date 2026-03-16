@@ -46,8 +46,8 @@ function fullContent(e: LiveEvent) {
   return "";
 }
 
-function projectName(path?: string | null) {
-  if (!path) return "Unknown Project";
+function projectName(path?: string | null, sessionId?: string) {
+  if (!path) return sessionId ? `Session ${sessionId.slice(0, 8)}` : "Unknown Project";
   return path.replace(/\\/g, "/").split("/").filter(Boolean).pop() ?? path;
 }
 
@@ -70,6 +70,8 @@ async function fetchEvents(params: { limit?: number; after?: number; userId?: st
   if (!res.ok) return [];
   return ((await res.json()).events ?? []) as LiveEvent[];
 }
+
+type SessionMeta = { projectPath: string | null; userId: string | null; user: { email: string } | null };
 
 // ── Detail Modal ──────────────────────────────────────────────────────────────
 function DetailModal({ event, onClose }: { event: LiveEvent; onClose: () => void }) {
@@ -112,11 +114,9 @@ function DetailModal({ event, onClose }: { event: LiveEvent; onClose: () => void
           <span style={{ fontWeight: 700, fontSize: "0.9rem", color: EVENT_COLORS[event.eventType] }}>
             {EVENT_LABELS[event.eventType]}
           </span>
-          {event.session?.user?.email && (
-            <span style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}>
-              · {event.session.user.email}
-            </span>
-          )}
+          <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", fontStyle: event.session?.user?.email ? "normal" : "italic" }}>
+            · {event.session?.user?.email ?? "anonymous"}
+          </span>
           <span style={{ marginLeft: "auto", fontSize: "0.68rem", color: "var(--text-muted)" }}>
             {new Date(event.timestamp).toLocaleString()}
           </span>
@@ -197,11 +197,9 @@ function EventCard({ e, onDetail }: { e: LiveEvent; onDetail: (e: LiveEvent) => 
         <span style={{ fontSize: "0.67rem", fontWeight: 600, color: EVENT_COLORS[e.eventType] ?? "var(--text-muted)" }}>
           {EVENT_LABELS[e.eventType] ?? e.eventType}
         </span>
-        {e.session?.user?.email && (
-          <span style={{ fontSize: "0.63rem", color: "var(--text-muted)" }}>
-            {e.session.user.email.split("@")[0]}
-          </span>
-        )}
+        <span style={{ fontSize: "0.63rem", color: "var(--text-muted)", fontStyle: e.session?.user?.email ? "normal" : "italic" }}>
+          {e.session?.user?.email ? e.session.user.email.split("@")[0] : "anonymous"}
+        </span>
         <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "0.4rem", flexShrink: 0 }}>
           <span style={{ fontSize: "0.62rem", color: "var(--text-muted)" }}>{timeLabel(e.timestamp)}</span>
           {hasContent && (
@@ -251,6 +249,7 @@ function EventCard({ e, onDetail }: { e: LiveEvent; onDetail: (e: LiveEvent) => 
 
 // ── Main Component ────────────────────────────────────────────────────────────
 interface ProjectGroup {
+  key: string;
   project: string;
   projectPath: string | null;
   events: LiveEvent[];
@@ -265,14 +264,42 @@ export function LiveFeed() {
   const [detail, setDetail] = useState<LiveEvent | null>(null);
   const lastIdRef = useRef<number>(0);
   const socketRef = useRef<Socket | null>(null);
+  // Cache session metadata to enrich real-time socket events (which have no session field)
+  const sessionCacheRef = useRef<Map<string, SessionMeta>>(new Map());
 
   const getUserId = () =>
     typeof window !== "undefined" ? localStorage.getItem("claude-reporter-uuid") ?? undefined : undefined;
 
+  const SESSION_CACHE_MAX = 200;
+
   const mergeEvents = useCallback((incoming: LiveEvent[]) => {
+    // Populate session cache from events that carry session data
+    for (const e of incoming) {
+      if (e.session && !sessionCacheRef.current.has(e.sessionId)) {
+        // Evict oldest entry when cache is full to prevent unbounded growth
+        if (sessionCacheRef.current.size >= SESSION_CACHE_MAX) {
+          const firstKey = sessionCacheRef.current.keys().next().value;
+          if (firstKey !== undefined) sessionCacheRef.current.delete(firstKey);
+        }
+        sessionCacheRef.current.set(e.sessionId, {
+          projectPath: e.session.projectPath ?? null,
+          userId: e.session.userId ?? null,
+          user: e.session.user ?? null,
+        });
+      }
+    }
+    // Enrich socket events that arrived without session data
+    const enriched = incoming.map((e) => {
+      if (!e.session) {
+        const cached = sessionCacheRef.current.get(e.sessionId);
+        if (cached) return { ...e, session: cached };
+      }
+      return e;
+    });
+
     setEvents((prev) => {
       const ids = new Set(prev.map((e) => e.id));
-      const newOnes = incoming.filter((e) => !ids.has(e.id));
+      const newOnes = enriched.filter((e) => !ids.has(e.id));
       if (newOnes.length === 0) return prev;
       const merged = [...newOnes, ...prev].sort((a, b) => b.id - a.id).slice(0, 500);
       if (merged[0]) lastIdRef.current = Math.max(lastIdRef.current, merged[0].id);
@@ -281,12 +308,15 @@ export function LiveFeed() {
   }, []);
 
   useEffect(() => {
-    const userId = filter === "mine" ? getUserId() : undefined;
+    // Always send userId when available — required for non-admin auth.
+    // "all" vs "mine" only has visible effect for admin (who has no localStorage uuid but sends admin cookie).
+    const userId = getUserId();
     fetchEvents({ limit: 150, userId }).then((evts) => {
-      setEvents(evts);
-      if (evts.length > 0) lastIdRef.current = evts[0].id;
+      // Use mergeEvents instead of setEvents to avoid overwriting real-time events
+      // that arrived from the socket before this fetch completed (race condition).
+      if (evts.length > 0) mergeEvents(evts);
     });
-  }, [filter]);
+  }, [filter, mergeEvents]);
 
   useEffect(() => {
     const socket = io({ path: "/socket.io" });
@@ -294,24 +324,33 @@ export function LiveFeed() {
     socket.on("connect", async () => {
       setConnected(true); setReconnecting(false);
       if (lastIdRef.current > 0) {
-        const missed = await fetchEvents({ after: lastIdRef.current, userId: filter === "mine" ? getUserId() : undefined });
+        const userId = getUserId();
+        const missed = await fetchEvents({ after: lastIdRef.current, userId });
         if (missed.length > 0) mergeEvents(missed);
       }
     });
     socket.on("disconnect", () => { setConnected(false); setReconnecting(true); });
-    socket.on("event", ({ event }: { event: LiveEvent }) => mergeEvents([event]));
+    socket.on("event", ({ event, ownerUserId }: { event: LiveEvent; ownerUserId?: string | null }) => {
+      const myId = getUserId();
+      // Only show real-time events that belong to the current user.
+      // If ownerUserId is absent (old server / tool events), let it through.
+      if (ownerUserId && myId && ownerUserId !== myId) return;
+      mergeEvents([event]);
+    });
+    // Note: filter is intentionally NOT in deps — filter changes only affect the
+    // initial fetch (handled above), not the socket subscription.
     return () => { socket.disconnect(); socketRef.current = null; };
-  }, [filter, mergeEvents]);
+  }, [mergeEvents]);
 
-  // Group by project
+  // Group by project path; sessions with no projectPath each get their own group keyed by sessionId
   const visibleEvents = events.filter((e) => VISIBLE_EVENTS.has(e.eventType));
   const groups: ProjectGroup[] = [];
   const projectMap = new Map<string, ProjectGroup>();
   for (const e of visibleEvents) {
     const path = e.session?.projectPath ?? null;
-    const key = path ?? "__unknown__";
+    const key = path ?? `__session__${e.sessionId}`;
     if (!projectMap.has(key)) {
-      const g: ProjectGroup = { project: projectName(path), projectPath: path, events: [] };
+      const g: ProjectGroup = { key, project: projectName(path, e.sessionId), projectPath: path, events: [] };
       projectMap.set(key, g);
       groups.push(g);
     }
@@ -353,7 +392,7 @@ export function LiveFeed() {
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
             {groups.map((g) => {
-              const key = g.projectPath ?? "__unknown__";
+              const { key } = g;
               const isCollapsed = collapsed[key] ?? false;
               return (
                 <div key={key} style={{ borderRadius: 8, border: "1px solid var(--border)", overflow: "hidden" }}>
@@ -368,9 +407,13 @@ export function LiveFeed() {
                   >
                     <span style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{isCollapsed ? "▶" : "▼"}</span>
                     <span style={{ fontSize: "0.78rem", fontWeight: 600, color: "var(--accent)" }}>📁 {g.project}</span>
-                    {g.projectPath && (
+                    {g.projectPath ? (
                       <span style={{ fontSize: "0.63rem", color: "var(--text-muted)", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {g.projectPath}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: "0.63rem", color: "var(--text-muted)", fontFamily: "monospace", fontStyle: "italic" }}>
+                        no project path
                       </span>
                     )}
                     <span style={{ marginLeft: "auto", fontSize: "0.65rem", color: "var(--text-muted)", flexShrink: 0 }}>

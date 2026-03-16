@@ -23,8 +23,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const department = await prisma.department.update({ where: { id }, data: { name } });
     return NextResponse.json({ department });
-  } catch {
-    return NextResponse.json({ error: "Not found or name conflict" }, { status: 404 });
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code;
+    if (code === "P2025") return NextResponse.json({ error: "Department not found" }, { status: 404 });
+    if (code === "P2002") return NextResponse.json({ error: "Name already in use" }, { status: 409 });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
@@ -36,10 +39,16 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { id } = await params;
 
   try {
-    await prisma.user.updateMany({ where: { departmentId: id }, data: { departmentId: null } });
-    await prisma.department.delete({ where: { id } });
+    // Wrap both steps in a transaction so no new user can be linked to this
+    // department between the updateMany and delete calls.
+    await prisma.$transaction([
+      prisma.user.updateMany({ where: { departmentId: id }, data: { departmentId: null } }),
+      prisma.department.delete({ where: { id } }),
+    ]);
     return NextResponse.json({ ok: true });
-  } catch {
-    return NextResponse.json({ error: "Department not found" }, { status: 404 });
+  } catch (err: unknown) {
+    const code = (err as { code?: string }).code;
+    if (code === "P2025") return NextResponse.json({ error: "Department not found" }, { status: 404 });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -1,39 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { projectName, resolveDeptScope } from "@/lib/reportUtils";
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const userId = searchParams.get("userId") ?? null;
+  const { userIds, error } = await resolveDeptScope(req);
+  if (error) return NextResponse.json({ error }, { status: 401 });
 
-  // Validate userId if provided
-  if (userId) {
-    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
-    if (!user) {
-      return NextResponse.json({ projects: [] });
-    }
+  const where: Record<string, unknown> = { projectPath: { not: null } };
+  if (userIds !== null) {
+    where.userId = userIds.length === 0 ? "__none__" : { in: userIds };
   }
 
-  const sessions = await prisma.session.findMany({
-    where: {
-      projectPath: { not: null },
-      ...(userId ? { userId } : {}),
-    },
-    select: { projectPath: true },
+  const agg = await prisma.session.groupBy({
+    by: ["projectPath"],
+    where,
+    _count: { id: true },
+    orderBy: { _count: { id: "desc" } },
   });
 
-  const projectMap = new Map<string, { name: string; path: string; count: number }>();
-  for (const s of sessions) {
-    if (!s.projectPath) continue;
-    const name = s.projectPath.split("/").filter(Boolean).pop() ?? s.projectPath;
-    const key = s.projectPath;
-    const existing = projectMap.get(key);
-    if (existing) {
-      existing.count++;
-    } else {
-      projectMap.set(key, { name, path: s.projectPath, count: 1 });
-    }
-  }
+  const projects = agg
+    .filter((r) => r.projectPath)
+    .map((r) => ({
+      name: projectName(r.projectPath),
+      path: r.projectPath!,
+      count: r._count.id,
+    }));
 
-  const projects = Array.from(projectMap.values()).sort((a, b) => b.count - a.count);
   return NextResponse.json({ projects });
 }

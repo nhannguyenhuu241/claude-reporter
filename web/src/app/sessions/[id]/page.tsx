@@ -1,6 +1,9 @@
-import { notFound } from "next/navigation";
+"use client";
+
+import { useEffect, useRef, useState, use } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
+import { io, Socket } from "socket.io-client";
 
 interface Event {
   id: number;
@@ -31,31 +34,6 @@ interface Session {
   events: Event[];
 }
 
-async function getSession(id: string): Promise<Session | null> {
-  try {
-    const row = await prisma.session.findUnique({
-      where: { id },
-      include: {
-        events: {
-          orderBy: { timestamp: "asc" },
-        },
-      },
-    });
-    if (!row) return null;
-    return {
-      ...row,
-      startedAt: row.startedAt.toISOString(),
-      endedAt: row.endedAt?.toISOString() ?? null,
-      events: row.events.map((e) => ({
-        ...e,
-        timestamp: e.timestamp.toISOString(),
-      })),
-    } as Session;
-  } catch {
-    return null;
-  }
-}
-
 const EVENT_ICONS: Record<string, string> = {
   tool_start: "⚡",
   tool_use: "🔧",
@@ -74,14 +52,66 @@ const EVENT_COLORS: Record<string, string> = {
   session_end: "#292524",
 };
 
-export default async function SessionPage({
+export default function SessionPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { id } = await params;
-  const session = await getSession(id);
-  if (!session) notFound();
+  const { id } = use(params);
+  const router = useRouter();
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+  const socketRef = useRef<Socket | null>(null);
+
+  useEffect(() => {
+    const userId = localStorage.getItem("claude-reporter-uuid");
+    const qs = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+
+    fetch(`/api/sessions/${id}${qs}`)
+      .then((r) => {
+        if (!r.ok) {
+          router.replace("/");
+          return null;
+        }
+        return r.json();
+      })
+      .then((data) => {
+        if (data) setSession(data);
+      })
+      .finally(() => setLoading(false));
+  }, [id, router]);
+
+  // Subscribe to the session room so real-time events (including tool events)
+  // are streamed directly to this page without going through the global live feed.
+  useEffect(() => {
+    const socket = io({ path: "/socket.io" });
+    socketRef.current = socket;
+    socket.on("connect", () => {
+      socket.emit("subscribe", { sessionId: id });
+    });
+    socket.on("event", ({ event }: { event: Event }) => {
+      setSession((prev) => {
+        if (!prev) return prev;
+        if (prev.events.some((e) => e.id === event.id)) return prev; // deduplicate
+        return { ...prev, events: [...prev.events, event] };
+      });
+    });
+    return () => {
+      socket.emit("unsubscribe", { sessionId: id });
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)" }}>
+        Loading…
+      </div>
+    );
+  }
+
+  if (!session) return null;
 
   const totalTokens =
     session.inputTokens + session.outputTokens + session.cacheCreationTokens + session.cacheReadTokens;

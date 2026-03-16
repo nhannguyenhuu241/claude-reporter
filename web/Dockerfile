@@ -25,7 +25,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3005
-ENV DATABASE_URL=file:/app/data/claude-reporter.db
+# DATABASE_URL is injected at runtime via docker-compose / environment variable
 
 # Copy everything from builder
 COPY --from=builder /app/node_modules ./node_modules
@@ -36,9 +36,6 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.ts ./next.config.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/server.ts ./server.ts
-
-# Create persistent data dir
-RUN mkdir -p /app/data
 
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

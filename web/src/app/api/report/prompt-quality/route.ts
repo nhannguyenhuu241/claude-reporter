@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getISOWeek, parseDateRange, resolveDeptScope } from "@/lib/reportUtils";
+import { checkRateLimit } from "@/lib/rateLimiter";
 
 // ── Heuristic classifiers ────────────────────────────────────────────────────
 
@@ -41,14 +43,6 @@ function similarity(a: string, b: string): number {
   return union > 0 ? intersection / union : 0;
 }
 
-function getISOWeek(date: Date): string {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7));
-  const week1 = new Date(d.getFullYear(), 0, 4);
-  const weekNum = 1 + Math.round(((d.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
-  return `W${String(weekNum).padStart(2, "0")}/${d.getFullYear()}`;
-}
 
 function calcScore(repPct: number, codePct: number, vaguePct: number): number {
   return Math.max(0, Math.round((100 - repPct * 0.4 - codePct * 0.3 - vaguePct * 0.3) * 10) / 10);
@@ -64,20 +58,29 @@ function scoreStatus(score: number): string {
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const fromStr = searchParams.get("from");
-  const toStr = searchParams.get("to");
-  const userId = searchParams.get("userId") ?? null;
+  const ip = req.headers.get("x-real-ip") ?? req.headers.get("x-forwarded-for") ?? "anon";
+  if (!checkRateLimit(`report:pq:${ip}`, 5)) {
+    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+  }
+  const { from, to } = parseDateRange(searchParams.get("from"), searchParams.get("to"));
+  const { userIds, error } = await resolveDeptScope(req);
+  if (error) return NextResponse.json({ error }, { status: 401 });
 
-  const from = fromStr ? new Date(fromStr + "T00:00:00.000Z") : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  const to = toStr ? new Date(toStr + "T23:59:59.999Z") : new Date();
+  const sessionFilter =
+    userIds === null
+      ? undefined
+      : userIds.length === 0
+      ? { userId: "__none__" }
+      : { userId: { in: userIds } };
 
-  // Fetch all user_prompt events in range, grouped by session → user
+  // Fetch user_prompt events in range.
+  // Cap at 20 000 to prevent OOM + O(n²) similarity explosion on large date ranges.
   const events = await prisma.event.findMany({
     where: {
       eventType: "user_prompt",
       timestamp: { gte: from, lte: to },
       userPrompt: { not: null },
-      session: userId ? { userId } : undefined,
+      session: sessionFilter,
     },
     select: {
       id: true,
@@ -93,6 +96,7 @@ export async function GET(req: NextRequest) {
       },
     },
     orderBy: { timestamp: "asc" },
+    take: 20_000,
   });
 
   // Group by user
@@ -139,7 +143,10 @@ export async function GET(req: NextRequest) {
     const codeDumpSet = new Set<number>();
     const repeatSet = new Set<number>();
 
-    // Per-session repetition detection
+    // Per-session repetition detection.
+    // Keep only the last 50 prompts per session as the comparison window — this bounds
+    // the inner loop at 50 comparisons per prompt (O(n×50) instead of O(n²)).
+    const SIMILARITY_WINDOW = 50;
     const sessionSeen = new Map<string, string[]>();
     for (let i = 0; i < m.prompts.length; i++) {
       const p = m.prompts[i];
@@ -154,6 +161,8 @@ export async function GET(req: NextRequest) {
         if (repeatedExamples.length < 5) repeatedExamples.push(p.text.slice(0, 120));
       }
       prev.push(p.text);
+      // Evict oldest entry to keep the window bounded
+      if (prev.length > SIMILARITY_WINDOW) prev.shift();
 
       if (isCodeDump(p.text)) {
         codeDumpSet.add(i);
