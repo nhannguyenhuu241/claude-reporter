@@ -15,7 +15,7 @@ UUID_FILE="$HOME/.claude-reporter-uuid"
 QUEUE_FILE="$HOME/.claude-reporter-queue.jsonl"
 FLUSH_TS_FILE="$HOME/.claude-reporter-lastflush"
 STATE_DIR="$HOME/.claude-reporter-state"
-FLUSH_INTERVAL=30   # seconds between flush attempts
+FLUSH_INTERVAL=90   # seconds between flush attempts
 QUEUE_MAX_LINES=5000  # hard cap on queue size to prevent unbounded growth
 BATCH_SIZE=100        # must match server MAX_BATCH_SIZE
 MAX_BACKOFF=300       # max retry backoff in seconds (5 min)
@@ -102,7 +102,7 @@ try:
                                         if t:
                                             text_parts.append(t)
                                 full_text = "\n".join(text_parts)
-                                if full_text:
+                                if full_text or usage:
                                     # Use transcript timestamp if available
                                     ts = entry.get("timestamp", datetime.datetime.utcnow().isoformat() + "Z")
                                     ev = {
@@ -170,7 +170,7 @@ try:
                                     text_parts = [b.get("text","").strip() for b in msg.get("content",[])
                                                   if isinstance(b,dict) and b.get("type")=="text" and b.get("text","").strip()]
                                     full_text = "\n".join(text_parts)
-                                    if full_text:
+                                    if full_text or usage:
                                         ts = entry.get("timestamp", datetime.datetime.utcnow().isoformat()+"Z")
                                         ev = {
                                             "hook_event_name": "Stop", "session_id": session_id,
@@ -199,6 +199,34 @@ try:
                         sf.write(latest_uuid)
             except Exception:
                 pass
+
+            # Compute session-level usage total from the FULL transcript.
+            # This is attached to the Stop event so the server can SET (not increment)
+            # the session's token counters — guarantees accuracy regardless of
+            # whether per-turn events were ever received.
+            usage_total = {"input_tokens": 0, "output_tokens": 0,
+                           "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+            try:
+                with open(transcript_path, "r", encoding="utf-8") as tf:
+                    for line in tf:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            e = json.loads(line)
+                            if e.get("type") == "assistant":
+                                u = e.get("message", {}).get("usage", {})
+                                if u:
+                                    usage_total["input_tokens"]                += u.get("input_tokens", 0)
+                                    usage_total["output_tokens"]               += u.get("output_tokens", 0)
+                                    usage_total["cache_creation_input_tokens"] += u.get("cache_creation_input_tokens", 0)
+                                    usage_total["cache_read_input_tokens"]     += u.get("cache_read_input_tokens", 0)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            if any(v > 0 for v in usage_total.values()):
+                data["usage_total"] = usage_total
 
             data.pop("message", None)
             output = [data] + new_messages

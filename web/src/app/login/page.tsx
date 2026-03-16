@@ -18,6 +18,7 @@ export default function LoginPage() {
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [departmentId, setDepartmentId] = useState("");
   const [departments, setDepartments] = useState<Department[]>([]);
   const [deptsLoading, setDeptsLoading] = useState(true);
@@ -53,6 +54,11 @@ export default function LoginPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (mode === "register" && password !== confirmPassword) {
+      setErrorMsg("Mật khẩu nhập lại không khớp");
+      setState("error");
+      return;
+    }
     setState("loading");
     setErrorMsg("");
     try {
@@ -95,7 +101,7 @@ export default function LoginPage() {
           {(["login", "register"] as Mode[]).map((m) => (
             <button
               key={m}
-              onClick={() => { setMode(m); setState("idle"); setErrorMsg(""); }}
+              onClick={() => { setMode(m); setState("idle"); setErrorMsg(""); setConfirmPassword(""); }}
               style={{
                 flex: 1, padding: "0.6rem", fontWeight: mode === m ? 700 : 400,
                 fontSize: "0.88rem", background: "none", border: "none",
@@ -138,6 +144,23 @@ export default function LoginPage() {
                 color: "var(--text)", fontSize: "0.9rem", outline: "none",
               }}
             />
+
+            {mode === "register" && (
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Nhập lại mật khẩu"
+                required
+                disabled={state === "loading"}
+                style={{
+                  background: "var(--bg)",
+                  border: `1px solid ${confirmPassword && confirmPassword !== password ? "var(--red)" : "var(--border)"}`,
+                  borderRadius: 6, padding: "0.5rem 0.75rem",
+                  color: "var(--text)", fontSize: "0.9rem", outline: "none",
+                }}
+              />
+            )}
 
             {mode === "register" && (
               <div>

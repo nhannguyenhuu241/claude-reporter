@@ -12,10 +12,9 @@ Claude Reporter là hệ thống theo dõi hoạt động Claude Code của toà
 2. [Đăng nhập lại / truy cập dashboard](#2-đăng-nhập-lại--truy-cập-dashboard)
 3. [Xem báo cáo](#3-xem-báo-cáo)
 4. [Trang Profile & UUID](#4-trang-profile--uuid)
-5. [Phân quyền](#5-phân-quyền)
-6. [Dành cho Admin](#6-dành-cho-admin)
-7. [Cài thủ công (không có Node.js)](#7-cài-thủ-công-không-có-nodejs)
-8. [Câu hỏi thường gặp](#8-câu-hỏi-thường-gặp)
+5. [Các thao tác thường dùng](#5-các-thao-tác-thường-dùng)
+6. [Cài thủ công (không có Node.js)](#6-cài-thủ-công-không-có-nodejs)
+7. [Câu hỏi thường gặp](#7-câu-hỏi-thường-gặp)
 
 ---
 
@@ -63,7 +62,7 @@ Tool sẽ tự động thực hiện toàn bộ 4 bước:
   › Profile:    https://vibe-reporter.onebot-training.meobeo.ai/profile
 ```
 
-**Khởi động lại Claude Code** để hook có hiệu lực. Dữ liệu xuất hiện trong dashboard sau ~30 giây đầu tiên sử dụng.
+**Khởi động lại Claude Code** để hook có hiệu lực. Dữ liệu xuất hiện trong dashboard sau ~90 giây đầu tiên sử dụng.
 
 ---
 
@@ -123,44 +122,38 @@ UUID dùng khi cài trên máy mới (xem [mục 7](#7-cài-thủ-công-không-c
 
 ---
 
-## 5. Phân quyền
+## 5. Các thao tác thường dùng
 
-| Tính năng | Member | Trưởng phòng | Admin |
-|-----------|:------:|:------------:|:-----:|
-| Xem session của mình | ✅ | ✅ | ✅ |
-| Báo cáo cá nhân | ✅ | ✅ | ✅ |
-| Báo cáo phòng ban | ❌ | ✅ phòng mình | ✅ tất cả |
-| Xem tất cả sessions | ❌ | ❌ | ✅ |
-| Quản lý users | ❌ | ❌ | ✅ |
-| Quản lý phòng ban | ❌ | ❌ | ✅ |
-| Reset dữ liệu | ❌ | ❌ | ✅ |
+### Đổi mật khẩu
 
----
+Hiện tại chưa có tính năng tự đổi mật khẩu. Liên hệ admin nếu cần reset.
 
-## 6. Dành cho Admin
+### Đăng xuất
 
-### Đăng nhập Admin
+Vào trang **Profile** → bấm **"Đăng xuất"** ở góc dưới phải. Phiên làm việc sẽ bị xoá, cần đăng nhập lại lần sau.
 
-Truy cập **`/admin`** và nhập `ADMIN_PASSWORD` (xem trong `.env` hoặc `docker-compose.yml`).
+### Cập nhật hook lên phiên bản mới
 
-### Quản lý Users
+Chạy lại lệnh setup — tool sẽ tải script mới nhất và giữ nguyên tài khoản:
 
-- Tạo / xoá / sửa thành viên
-- Gán vai trò: `member` hoặc `dept_head`
-- Gán phòng ban
+```bash
+npx claude-reporter-setup
+```
 
-### Quản lý Phòng ban
+Chọn `1` Đăng nhập → nhập email + mật khẩu → hook được cập nhật, UUID giữ nguyên.
 
-- Tạo / sửa / xoá phòng ban
-- Xem danh sách thành viên mỗi phòng
+### Kiểm tra hook đang hoạt động
 
-### Phân tích AI
+Sau khi cài, dùng Claude Code bình thường, rồi vào **Dashboard → Sessions** — nếu thấy session mới xuất hiện sau ~90 giây là hook đang hoạt động tốt.
 
-Trang **Báo cáo phân tích** dùng Gemini API để tóm tắt chất lượng hoạt động. Cần cấu hình `GEMINI_API_KEY` trong `.env`.
+Nếu không thấy dữ liệu sau vài phút:
+1. Kiểm tra file UUID: `cat ~/.claude-reporter-uuid` — phải có nội dung
+2. Kiểm tra hook script: `ls ~/.claude/hooks/claude-reporter.sh`
+3. Khởi động lại Claude Code và thử lại
 
 ---
 
-## 7. Cài thủ công (không có Node.js)
+## 6. Cài thủ công (không có Node.js)
 
 Nếu máy không có Node.js, dùng cách thủ công tương đương.
 
@@ -197,10 +190,10 @@ bash /tmp/replay.sh --dry-run   # xem trước, không gửi dữ liệu
 
 ---
 
-## 8. Câu hỏi thường gặp
+## 7. Câu hỏi thường gặp
 
 **Q: Hook có làm chậm Claude Code không?**
-Không. Script chạy bất đồng bộ, gom sự kiện vào hàng đợi local và flush mỗi 30 giây. Nếu mất mạng, tự retry với exponential backoff (tối đa 5 phút).
+Không. Script chạy bất đồng bộ, gom sự kiện vào hàng đợi local và flush mỗi **90 giây**. Nếu mất mạng, tự retry với exponential backoff (tối đa 5 phút).
 
 **Q: Dữ liệu nào được thu thập?**
 Loại sự kiện (tool use, prompt, response), thời gian, session ID, token usage và nội dung để hiển thị trên dashboard.
