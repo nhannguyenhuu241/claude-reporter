@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Phân Tích Hiệu Quả Prompt - Claude Log</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        .header-stats {
+            display: flex;
+            gap: 30px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        .header-stat {
+            background: rgba(255,255,255,0.15);
+            padding: 10px 20px;
+            border-radius: 8px;
+        }
+        .header-stat span {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .header-stat strong {
+            display: block;
+            font-size: 20px;
+            margin-top: 5px;
+        }
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 25px;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .card-title {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .card-value {
+            font-size: 32px;
+            font-weight: bold;
+            color: #1e3c72;
+        }
+        .card-value.good { color: #28a745; }
+        .card-value.warning { color: #ffc107; }
+        .card-value.danger { color: #dc3545; }
+        .card-subtitle {
+            font-size: 13px;
+            color: #888;
+            margin-top: 5px;
+        }
+        .section {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #1e3c72;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #eee;
+        }
+        .project-list-section .section-title {
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .project-list-section .section-title .toggle-icon {
+            font-size: 14px;
+            transition: transform 0.3s;
+        }
+        .project-list-section .section-title .toggle-icon.collapsed {
+            transform: rotate(-90deg);
+        }
+        .project-list-content.collapsed {
+            display: none;
+        }
+        .project-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 8px;
+        }
+        .project-tag {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: linear-gradient(135deg, #f0f4ff 0%, #e8ecf8 100%);
+            border-radius: 8px;
+            font-size: 13px;
+            color: #1e3c72;
+            border: 1px solid #d5ddf5;
+        }
+        .project-tag .proj-icon {
+            flex-shrink: 0;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4f46e5;
+        }
+        .project-tag .proj-name {
+            word-break: break-all;
+        }
+        .proj-pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 6px;
+            margin-top: 16px;
+            flex-wrap: wrap;
+        }
+        .proj-pagination button {
+            padding: 6px 12px;
+            border: 1px solid #d5ddf5;
+            border-radius: 6px;
+            background: #fff;
+            color: #1e3c72;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .proj-pagination button:hover { background: #e8ecf8; }
+        .proj-pagination button.active {
+            background: #4f46e5;
+            color: #fff;
+            border-color: #4f46e5;
+        }
+        .proj-pagination button:disabled { opacity: 0.4; cursor: default; }
+        .formula-box {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 2px solid #1e3c72;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+        .formula-box h3 {
+            color: #1e3c72;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        .formula-box code {
+            display: block;
+            background: #1e3c72;
+            color: #fff;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 15px;
+            font-family: 'Courier New', monospace;
+        }
+        .formula-box ul {
+            margin-left: 20px;
+            color: #555;
+        }
+        .formula-box li {
+            margin: 8px 0;
+            font-size: 13px;
+        }
+        .metrics-chart {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .metric-bar {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .metric-label {
+            width: 150px;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .metric-bar-container {
+            flex: 1;
+            height: 30px;
+            background: #e9ecef;
+            border-radius: 15px;
+            overflow: hidden;
+            position: relative;
+        }
+        .metric-bar-fill {
+            height: 100%;
+            border-radius: 15px;
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 10px;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+        .metric-bar-fill.red { background: linear-gradient(90deg, #dc3545, #c82333); }
+        .metric-bar-fill.orange { background: linear-gradient(90deg, #fd7e14, #e8590c); }
+        .metric-bar-fill.yellow { background: linear-gradient(90deg, #ffc107, #e0a800); color: #333; }
+        .metric-bar-fill.green { background: linear-gradient(90deg, #28a745, #1e7e34); }
+        .metric-value {
+            width: 60px;
+            text-align: right;
+            font-weight: bold;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        th {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 12px 10px;
+            text-align: left;
+            font-weight: 600;
+        }
+        td {
+            padding: 12px 10px;
+            border-bottom: 1px solid #eee;
+        }
+        tr:hover {
+            background: #f8f9fa;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            border-radius: 4px;
+        }
+        .progress-fill.good { background: #28a745; }
+        .progress-fill.warning { background: #ffc107; }
+        .progress-fill.danger { background: #dc3545; }
+        .progress-fill.na { background: #6c757d; }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .status-badge.good { background: #d4edda; color: #155724; }
+        .status-badge.warning { background: #fff3cd; color: #856404; }
+        .status-badge.danger { background: #f8d7da; color: #721c24; }
+        .status-badge.na { background: #e2e3e5; color: #383d41; }
+        .calculation-detail {
+            font-size: 11px;
+            color: #666;
+            margin-top: 4px;
+            font-family: 'Courier New', monospace;
+        }
+        .trend-chart {
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+            height: 150px;
+            padding: 20px 0;
+        }
+        .trend-bar {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 5px;
+        }
+        .trend-bar-fill {
+            width: 100%;
+            max-width: 60px;
+            background: linear-gradient(180deg, #1e3c72, #2a5298);
+            border-radius: 5px 5px 0 0;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding-top: 5px;
+            color: white;
+            font-size: 11px;
+            font-weight: bold;
+        }
+        .trend-label {
+            font-size: 11px;
+            color: #666;
+        }
+        .trend-arrow {
+            font-size: 16px;
+        }
+        .trend-arrow.up { color: #28a745; }
+        .trend-arrow.down { color: #dc3545; }
+        .trend-arrow.stable { color: #6c757d; }
+        .trend-summary {
+            background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+        .trend-summary.warning {
+            background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+        }
+        .trend-summary.danger {
+            background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+        }
+        .collapsible {
+            cursor: pointer;
+            padding: 15px;
+            background: #f8f9fa;
+            border: none;
+            width: 100%;
+            text-align: left;
+            font-size: 15px;
+            font-weight: 600;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .collapsible:hover {
+            background: #e9ecef;
+        }
+        .collapsible-content {
+            display: none;
+            padding: 15px;
+            background: #fff;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        .collapsible-content.active {
+            display: block;
+        }
+        .example-list {
+            list-style: none;
+        }
+        .example-list li {
+            padding: 10px;
+            border-left: 3px solid #dc3545;
+            margin-bottom: 10px;
+            background: #f8f9fa;
+            font-size: 13px;
+        }
+        .example-list li.code-dump {
+            border-left-color: #fd7e14;
+        }
+        .example-list li.vague {
+            border-left-color: #ffc107;
+        }
+        .member-name {
+            font-weight: 600;
+            color: #1e3c72;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: rgba(255,255,255,0.8);
+            font-size: 13px;
+        }
+        .top-improver {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        .top-improver .rank {
+            width: 30px;
+            height: 30px;
+            background: linear-gradient(135deg, #ffd700, #ffb300);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #333;
+        }
+        .top-improver .rank.silver { background: linear-gradient(135deg, #c0c0c0, #a0a0a0); }
+        .top-improver .rank.bronze { background: linear-gradient(135deg, #cd7f32, #b87333); color: white; }
+        .week-comparison {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .week-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .week-card h4 {
+            color: #1e3c72;
+            margin-bottom: 10px;
+        }
+        @media (max-width: 768px) {
+            .header-stats {
+                flex-direction: column;
+                gap: 10px;
+            }
+            .metric-bar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .metric-label {
+                width: 100%;
+            }
+            th, td {
+                padding: 8px 5px;
+                font-size: 12px;
+            }
+        }
+
+        /* Print styles - show all content for PDF export */
+        * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }
+        @media print {
+            body {
+                background: white !important;
+                padding: 10px !important;
+            }
+            .container { max-width: 100% !important; }
+            .section { break-inside: avoid; page-break-inside: avoid; }
+            .header { break-inside: avoid; page-break-inside: avoid; }
+            .project-tag { display: flex !important; }
+            .proj-pagination { display: none !important; }
+            .proj-search-bar { display: none !important; }
+            .project-list-content.collapsed { display: block !important; }
+            .toggle-icon { display: none !important; }
+            .chart-container { break-inside: avoid; page-break-inside: avoid; }
+            .grid-2 { break-inside: avoid; page-break-inside: avoid; }
+            .survey-grid { break-inside: avoid; page-break-inside: avoid; }
+            .print-btn { display: none !important; }
+            .collapsible-content { display: block !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>📊 Dashboard Phân Tích Hiệu Quả Prompt</h1>
+            <p style="opacity: 0.9;">Phòng Claude Log | Kỳ báo cáo: 25/11/2025 - 06/03/2026</p>
+            <div class="header-stats">
+                <div class="header-stat">
+                    <span>Tổng Thành Viên</span>
+                    <strong>7</strong>
+                </div>
+                <div class="header-stat">
+                    <span>Tổng Prompts</span>
+                    <strong>1,734</strong>
+                </div>
+                <div class="header-stat">
+                    <span>Tổng Sessions</span>
+                    <strong>28</strong>
+                </div>
+                <div class="header-stat">
+                    <span>Tổng Tokens</span>
+                    <strong>597,485</strong>
+                </div>
+                <div class="header-stat">
+                    <span>Lines of Code</span>
+                    <strong>3,534,102</strong>
+                </div>
+                <div class="header-stat">
+                    <span>Dự Án</span>
+                    <strong>23</strong>
+                </div>
+            </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="cards-grid">
+            <div class="card">
+                <div class="card-title">Tổng Prompts</div>
+                <div class="card-value">1,734</div>
+                <div class="card-subtitle">Trong kỳ báo cáo</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Điểm Hiệu Quả Trung Bình</div>
+                <div class="card-value good">89.6</div>
+                <div class="card-subtitle">Trung bình toàn phòng</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Prompts Có Vấn Đề</div>
+                <div class="card-value good">6.3%</div>
+                <div class="card-subtitle">109 prompts cần cải thiện</div>
+            </div>
+            <div class="card">
+                <div class="card-title">Top Performer</div>
+                <div class="card-value good">todh</div>
+                <div class="card-subtitle">Điểm hiệu quả: 98.8</div>
+            </div>
+        </div>
+
+        <!-- Formula Box -->
+        <div class="formula-box">
+            <h3>📐 Công Thức Tính Điểm Hiệu Quả</h3>
+            <code>Efficiency Score = 100 - (Repetition% × 0.4) - (CodeDump% × 0.3) - (Vague% × 0.3)</code>
+            <p style="margin-bottom: 10px; font-weight: 600;">Trong đó:</p>
+            <ul>
+                <li><strong>Repetition%</strong> = (Số prompt lặp lại / Tổng prompt) × 100 — Trọng số: 40%</li>
+                <li><strong>CodeDump%</strong> = (Số prompt chỉ paste code không giải thích / Tổng prompt) × 100 — Trọng số: 30%</li>
+                <li><strong>Vague%</strong> = (Số prompt mơ hồ, thiếu chi tiết / Tổng prompt) × 100 — Trọng số: 30%</li>
+            </ul>
+            <p style="margin-top: 15px; font-size: 13px; color: #666;">
+                <strong>Tiêu chí đánh giá:</strong> ≥80: TỐT (xanh lá) | 60-79: TRUNG BÌNH (vàng) | &lt;60: CẦN CẢI THIỆN (đỏ) | &lt;10 prompts: N/A (xám)
+            </p>
+        </div>
+
+        <!-- Project List Section -->
+        
+        
+        <div class="section project-list-section" id="projectListSection">
+            <div class="section-title" onclick="toggleProjectList()">
+                <span>📂 Danh Sách Dự Án (23)</span>
+                <span class="toggle-icon" id="projectToggleIcon">▼</span>
+            </div>
+            <div class="project-list-content" id="projectListContent">
+                <div class="project-grid" id="projectGrid">
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="... / epoints / task / manager / mobile / matthews">... / epoints / task / manager / mobile / matthews</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="... Dev / DotNetWorkspaces / water / billing / api">... Dev / DotNetWorkspaces / water / billing / api</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title=".../ bangnb / Dev / DotNetWorkspaces / core / sync">.../ bangnb / Dev / DotNetWorkspaces / core / sync</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title=".../ epoints / task / manager / mobile / developer">.../ epoints / task / manager / mobile / developer</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title=".../ WaterBillingPortal / water / billing / portal">.../ WaterBillingPortal / water / billing / portal</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="...AO / NhaBe / Project / water / billing / portal">...AO / NhaBe / Project / water / billing / portal</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="...AO / WASUCO / water / billing / app / MinhQuang">...AO / WASUCO / water / billing / app / MinhQuang</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="...dev / source / epoints / epoints / staffs / api">...dev / source / epoints / epoints / staffs / api</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="...g / WAO / SourceCode / water / billing / portal">...g / WAO / SourceCode / water / billing / portal</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="...king / WAO / SourceCode / water / billing / api">...king / WAO / SourceCode / water / billing / api</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="...oints / epoints / brand / portal / piospa / com">...oints / epoints / brand / portal / piospa / com</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="...WAO / BaoThay / centralized / meter / 1 / 0 / 0">...WAO / BaoThay / centralized / meter / 1 / 0 / 0</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="d /  / Company / WAO / FILTER / DULIEU">d /  / Company / WAO / FILTER / DULIEU</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="D /  / dev / source / cnc / cnc / portal">D /  / dev / source / cnc / cnc / portal</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="d /  / dev / source / cnc / cnc / share / service">d /  / dev / source / cnc / cnc / share / service</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="D /  / dev / source / cnc / cnc / staff / api">D /  / dev / source / cnc / cnc / staff / api</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="D /  / dev / source / matthews / matthews / portal">D /  / dev / source / matthews / matthews / portal</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="e /  / WAO / BaoThay / WASUCOWORK">e /  / WAO / BaoThay / WASUCOWORK</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="E /  / WAO / BE / water / billing / api">E /  / WAO / BE / water / billing / api</span>
+                    </div>
+                    
+                    <div class="project-tag">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="E /  / WAO / CNC / cnc / staff / app / master">E /  / WAO / CNC / cnc / staff / app / master</span>
+                    </div>
+                    
+                    <div class="project-tag" style="display:none">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="J /  / wao / matthews / portal / new">J /  / wao / matthews / portal / new</span>
+                    </div>
+                    
+                    <div class="project-tag" style="display:none">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="Users / ASUS /  / local / bin">Users / ASUS /  / local / bin</span>
+                    </div>
+                    
+                    <div class="project-tag" style="display:none">
+                        <span class="proj-icon"></span>
+                        <span class="proj-name" title="Users / DOANHONGTO">Users / DOANHONGTO</span>
+                    </div>
+                    
+                </div>
+                
+                
+                <div class="proj-pagination">
+                    <button id="projPrev" onclick="projGoToPage(_projCurrentPage-1)" disabled>&#9664;</button>
+                    
+                    <button data-page="1" onclick="projGoToPage(1)" class="active">1</button>
+                    
+                    <button data-page="2" onclick="projGoToPage(2)">2</button>
+                    
+                    <button id="projNext" onclick="projGoToPage(_projCurrentPage+1)">&#9654;</button>
+                </div>
+                
+            </div>
+        </div>
+        <!-- /Project List Section -->
+        
+
+        <!-- Efficiency Metrics Section -->
+        <div class="section">
+            <div class="section-title">📈 Tỷ Lệ Các Vấn Đề Chính</div>
+            <div class="metrics-chart">
+                <div class="metric-bar">
+                    <div class="metric-label">Tỷ Lệ Lặp Lại</div>
+                    <div class="metric-bar-container">
+                        <div class="metric-bar-fill orange" style="width: 14%;">14.0%</div>
+                    </div>
+                    <div class="metric-value" style="color: #fd7e14;">14.0%</div>
+                </div>
+                <div class="metric-bar">
+                    <div class="metric-label">Code Dump Rate</div>
+                    <div class="metric-bar-container">
+                        <div class="metric-bar-fill green" style="width: 0%;">0.0%</div>
+                    </div>
+                    <div class="metric-value" style="color: #28a745;">0.0%</div>
+                </div>
+                <div class="metric-bar">
+                    <div class="metric-label">Tỷ Lệ Mơ Hồ</div>
+                    <div class="metric-bar-container">
+                        <div class="metric-bar-fill green" style="width: 5%;">5.0%</div>
+                    </div>
+                    <div class="metric-value" style="color: #28a745;">5.0%</div>
+                </div>
+                <div class="metric-bar">
+                    <div class="metric-label">Tổng Có Vấn Đề</div>
+                    <div class="metric-bar-container">
+                        <div class="metric-bar-fill green" style="width: 6.3%;">6.3%</div>
+                    </div>
+                    <div class="metric-value" style="color: #28a745;">6.3%</div>
+                </div>
+            </div>
+            <p style="margin-top: 15px; font-size: 13px; color: #888;">
+                ⚠️ Ngưỡng cảnh báo: Lặp lại >20% | Code Dump >15% | Mơ hồ >10%
+            </p>
+        </div>
+
+        <!-- Security Awareness Section -->
+        
+
+        <!-- Member Performance Table -->
+        <div class="section">
+            <div class="section-title">👥 Bảng Xếp Hạng Thành Viên (Theo Điểm Hiệu Quả)</div>
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Tên Thành Viên</th>
+                            <th>Prompts</th>
+                            <th>LOC</th>
+                            <th>Hiệu Quả</th>
+                            <th>Lặp Lại</th>
+                            <th>Code Dump</th>
+                            <th>Mơ Hồ</th>
+                            <th>Trạng Thái</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        
+                        <tr>
+                            <td>1</td>
+                            <td class="member-name">todh</td>
+                            <td>46</td>
+                            <td>153,836</td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="progress-bar" style="width: 80px;">
+                                        <div class="progress-fill good" style="width: 98.8%;"></div>
+                                    </div>
+                                    <strong style="color: #28a745;">98.8</strong>
+                                </div>
+                                <div class="calculation-detail">= 100 - (0% × 0.4) - (0% × 0.3) - (4% × 0.3)</div>
+                            </td>
+                            <td>0%</td>
+                            <td>0%</td>
+                            <td>4%</td>
+                            <td><span class="status-badge good">TỐT</span></td>
+                        </tr>
+                        
+                        <tr>
+                            <td>2</td>
+                            <td class="member-name">WangML</td>
+                            <td>570</td>
+                            <td>2,641,184</td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="progress-bar" style="width: 80px;">
+                                        <div class="progress-fill good" style="width: 96.9%;"></div>
+                                    </div>
+                                    <strong style="color: #28a745;">96.9</strong>
+                                </div>
+                                <div class="calculation-detail">= 100 - (4% × 0.4) - (0% × 0.3) - (5% × 0.3)</div>
+                            </td>
+                            <td>4%</td>
+                            <td>0%</td>
+                            <td>5%</td>
+                            <td><span class="status-badge good">TỐT</span></td>
+                        </tr>
+                        
+                        <tr>
+                            <td>3</td>
+                            <td class="member-name">bangnb</td>
+                            <td>25</td>
+                            <td>90,135</td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="progress-bar" style="width: 80px;">
+                                        <div class="progress-fill good" style="width: 93.2%;"></div>
+                                    </div>
+                                    <strong style="color: #28a745;">93.2</strong>
+                                </div>
+                                <div class="calculation-detail">= 100 - (8% × 0.4) - (0% × 0.3) - (12% × 0.3)</div>
+                            </td>
+                            <td>8%</td>
+                            <td>0%</td>
+                            <td>12%</td>
+                            <td><span class="status-badge good">TỐT</span></td>
+                        </tr>
+                        
+                        <tr>
+                            <td>4</td>
+                            <td class="member-name">VanLTH</td>
+                            <td>35</td>
+                            <td>160,971</td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="progress-bar" style="width: 80px;">
+                                        <div class="progress-fill good" style="width: 92.9%;"></div>
+                                    </div>
+                                    <strong style="color: #28a745;">92.9</strong>
+                                </div>
+                                <div class="calculation-detail">= 100 - (11% × 0.4) - (0% × 0.3) - (9% × 0.3)</div>
+                            </td>
+                            <td>11%</td>
+                            <td>0%</td>
+                            <td>9%</td>
+                            <td><span class="status-badge good">TỐT</span></td>
+                        </tr>
+                        
+                        <tr>
+                            <td>5</td>
+                            <td class="member-name">HungDT</td>
+                            <td>742</td>
+                            <td>363,390</td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="progress-bar" style="width: 80px;">
+                                        <div class="progress-fill good" style="width: 90.6%;"></div>
+                                    </div>
+                                    <strong style="color: #28a745;">90.6</strong>
+                                </div>
+                                <div class="calculation-detail">= 100 - (19% × 0.4) - (0% × 0.3) - (6% × 0.3)</div>
+                            </td>
+                            <td>19%</td>
+                            <td>0%</td>
+                            <td>6%</td>
+                            <td><span class="status-badge good">TỐT</span></td>
+                        </tr>
+                        
+                        <tr>
+                            <td>6</td>
+                            <td class="member-name">DatTranPhu</td>
+                            <td>14</td>
+                            <td>2,815</td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="progress-bar" style="width: 80px;">
+                                        <div class="progress-fill good" style="width: 82.8%;"></div>
+                                    </div>
+                                    <strong style="color: #28a745;">82.8</strong>
+                                </div>
+                                <div class="calculation-detail">= 100 - (43% × 0.4) - (0% × 0.3) - (0% × 0.3)</div>
+                            </td>
+                            <td>43%</td>
+                            <td>0%</td>
+                            <td>0%</td>
+                            <td><span class="status-badge good">TỐT</span></td>
+                        </tr>
+                        
+                        <tr>
+                            <td>7</td>
+                            <td class="member-name">TriND</td>
+                            <td>302</td>
+                            <td>121,771</td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <div class="progress-bar" style="width: 80px;">
+                                        <div class="progress-fill warning" style="width: 72.0%;"></div>
+                                    </div>
+                                    <strong style="color: #ffc107;">72.0</strong>
+                                </div>
+                                <div class="calculation-detail">= 100 - (70% × 0.4) - (0% × 0.3) - (0% × 0.3)</div>
+                            </td>
+                            <td>70%</td>
+                            <td>0%</td>
+                            <td>0%</td>
+                            <td><span class="status-badge warning">TRUNG BÌNH</span></td>
+                        </tr>
+                        
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Weekly Trend Analysis -->
+        <div class="section">
+            <div class="section-title">📈 Phân Tích Xu Hướng Theo Tuần</div>
+
+            <!-- Weekly Comparison Table -->
+            <h4 style="margin-bottom: 15px; color: #1e3c72;">Bảng So Sánh Theo Tuần</h4>
+            <div style="overflow-x: auto; margin-bottom: 25px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Tuần</th>
+                            <th>Số Prompts</th>
+                            <th>Repetition%</th>
+                            <th>CodeDump%</th>
+                            <th>Vague%</th>
+                            <th>Efficiency Score</th>
+                            <th>Xu Hướng</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        
+                        <tr>
+                            <td><strong>2025-W51</strong></td>
+                            <td>30</td>
+                            <td>3%</td>
+                            <td>0%</td>
+                            <td>7%</td>
+                            <td>96.7</td>
+                            <td>
+                                
+                                <span class="trend-arrow stable">→</span> Điểm khởi đầu
+                                
+                            </td>
+                        </tr>
+                        
+                        <tr>
+                            <td><strong>2025-W52</strong></td>
+                            <td>66</td>
+                            <td>8%</td>
+                            <td>0%</td>
+                            <td>3%</td>
+                            <td>95.9</td>
+                            <td>
+                                
+                                <span class="trend-arrow stable">→</span> Ổn định
+                                
+                            </td>
+                        </tr>
+                        
+                        <tr>
+                            <td><strong>2026-W01</strong></td>
+                            <td>345</td>
+                            <td>5%</td>
+                            <td>1%</td>
+                            <td>8%</td>
+                            <td>95.3</td>
+                            <td>
+                                
+                                <span class="trend-arrow stable">→</span> Ổn định
+                                
+                            </td>
+                        </tr>
+                        
+                        <tr>
+                            <td><strong>2026-W02</strong></td>
+                            <td>449</td>
+                            <td>14%</td>
+                            <td>0%</td>
+                            <td>6%</td>
+                            <td>92.6</td>
+                            <td>
+                                
+                                <span class="trend-arrow down">↓</span> <span style="color: #dc3545;">-2.7</span>
+                                
+                            </td>
+                        </tr>
+                        
+                        <tr>
+                            <td><strong>2026-W03</strong></td>
+                            <td>266</td>
+                            <td>12%</td>
+                            <td>0%</td>
+                            <td>3%</td>
+                            <td>94.3</td>
+                            <td>
+                                
+                                <span class="trend-arrow up">↑</span> <span style="color: #28a745;">+1.7</span>
+                                
+                            </td>
+                        </tr>
+                        
+                        <tr>
+                            <td><strong>2026-W04</strong></td>
+                            <td>95</td>
+                            <td>21%</td>
+                            <td>0%</td>
+                            <td>6%</td>
+                            <td>89.8</td>
+                            <td>
+                                
+                                <span class="trend-arrow down">↓</span> <span style="color: #dc3545;">-4.5</span>
+                                
+                            </td>
+                        </tr>
+                        
+                        <tr>
+                            <td><strong>2026-W09</strong></td>
+                            <td>66</td>
+                            <td>70%</td>
+                            <td>0%</td>
+                            <td>0%</td>
+                            <td>72.0</td>
+                            <td>
+                                
+                                <span class="trend-arrow down">↓</span> <span style="color: #dc3545;">-17.8</span>
+                                
+                            </td>
+                        </tr>
+                        
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Trend Chart -->
+            <h4 style="margin-bottom: 15px; color: #1e3c72;">Biểu Đồ Xu Hướng Điểm Hiệu Quả</h4>
+            <div class="trend-chart">
+                
+                <div class="trend-bar">
+                    <div class="trend-bar-fill" style="height: 145px;">97</div>
+                    <div class="trend-label">W51</div>
+                </div>
+                
+                <div class="trend-bar">
+                    <div class="trend-bar-fill" style="height: 143px;">96</div>
+                    <div class="trend-label">W52</div>
+                </div>
+                
+                <div class="trend-bar">
+                    <div class="trend-bar-fill" style="height: 142px;">95</div>
+                    <div class="trend-label">W01</div>
+                </div>
+                
+                <div class="trend-bar">
+                    <div class="trend-bar-fill" style="height: 138px;">93</div>
+                    <div class="trend-label">W02</div>
+                </div>
+                
+                <div class="trend-bar">
+                    <div class="trend-bar-fill" style="height: 141px;">94</div>
+                    <div class="trend-label">W03</div>
+                </div>
+                
+                <div class="trend-bar">
+                    <div class="trend-bar-fill" style="height: 134px;">90</div>
+                    <div class="trend-label">W04</div>
+                </div>
+                
+                <div class="trend-bar">
+                    <div class="trend-bar-fill" style="height: 108px;">72</div>
+                    <div class="trend-label">W09</div>
+                </div>
+                
+            </div>
+
+            <!-- Trend Summary -->
+            <div class="trend-summary danger">
+                <h4 style="margin-bottom: 10px;">📊 Tổng Kết Xu Hướng</h4>
+                <p><strong>Tuần đầu → Tuần cuối:</strong> Score thay đổi từ <strong>96.7</strong> → <strong>72.0</strong> (<span style="color: #dc3545;">-24.7 điểm, -25.5%</span>)</p>
+                <p style="margin-top: 10px;"><strong>Đánh giá:</strong> ⚠️ <span style="color: #dc3545; font-weight: bold;">Cần xem xét lại</span></p>
+            </div>
+
+            <!-- Top 3 Improvers -->
+            
+            <h4 style="margin: 25px 0 15px; color: #1e3c72;">🏆 Top 3 Thành Viên Cải Thiện Nhiều Nhất</h4>
+            
+            <div class="top-improver">
+                <div class="rank ">1</div>
+                <div style="flex: 1;">
+                    <strong>DatTranPhu</strong>
+                    <div style="font-size: 13px; color: #666;">2026-W03: 80.0 → 2026-W04: 100.0</div>
+                </div>
+                <div style="color: #28a745; font-weight: bold;">+20.0 điểm</div>
+            </div>
+            
+            <div class="top-improver">
+                <div class="rank silver">2</div>
+                <div style="flex: 1;">
+                    <strong>bangnb</strong>
+                    <div style="font-size: 13px; color: #666;">2025-W52: 92.7 → 2026-W01: 93.4</div>
+                </div>
+                <div style="color: #28a745; font-weight: bold;">+0.7 điểm</div>
+            </div>
+            
+            <div class="top-improver">
+                <div class="rank bronze">3</div>
+                <div style="flex: 1;">
+                    <strong>todh</strong>
+                    <div style="font-size: 13px; color: #666;">2026-W03: 99.1 → 2026-W04: 96.4</div>
+                </div>
+                <div style="color: #dc3545; font-weight: bold;">-2.7 điểm</div>
+            </div>
+            
+            
+        </div>
+
+        <!-- Problem Details Section -->
+        <div class="section">
+            <div class="section-title">🔍 Chi Tiết Vấn Đề (Ví Dụ Cụ Thể)</div>
+
+            <!-- Repetition Examples -->
+            <button class="collapsible" onclick="toggleCollapsible(this)">
+                🔄 Ví Dụ Prompts Lặp Lại (5 mẫu)
+                <span>▼</span>
+            </button>
+            <div class="collapsible-content">
+                <ul class="example-list">
+                    
+                    <li>
+                        <strong>DatTranPhu:</strong> "@filter_data.py @TỒN ĐẾN 01-2026.xlsx Phân tích  2 file và thực hiện File excel có dạng như hình Giúp tôi làm một script"
+                        <br><em style="color: #888;">(prompt thông thường)</em>
+                    </li>
+                    
+                    <li>
+                        <strong>DatTranPhu:</strong> "@filter_data.py @TỒN ĐẾN 01-2026.xlsx Phân tích  2 file và thực hiện File excel có dạng như hình Giúp tôi làm một script"
+                        <br><em style="color: #888;">(prompt thông thường)</em>
+                    </li>
+                    
+                    <li>
+                        <strong>DatTranPhu:</strong> "Tại sao trong file chỉ có gần 1000 record mà sau data lại có 15,773 record"
+                        <br><em style="color: #888;">(prompt thông thường)</em>
+                    </li>
+                    
+                    <li>
+                        <strong>HungDT:</strong> "The user selected the lines 3 to 3 from d:\Working\WAO\SourceCode\water-billing-api\WaterBilling\src\Models\MeterReading"
+                        <br><em style="color: #888;">(prompt thông thường)</em>
+                    </li>
+                    
+                    <li>
+                        <strong>HungDT:</strong> "The user selected the lines 5 to 5 from d:\Working\WAO\SourceCode\water-billing-api\WaterBilling\src\Models\MeterReading"
+                        <br><em style="color: #888;">(prompt thông thường)</em>
+                    </li>
+                    
+                </ul>
+            </div>
+
+            <!-- Code Dump Examples -->
+            <button class="collapsible" onclick="toggleCollapsible(this)">
+                📋 Ví Dụ Code Dump (0 mẫu)
+                <span>▼</span>
+            </button>
+            <div class="collapsible-content">
+                <ul class="example-list">
+                    
+                </ul>
+            </div>
+
+            <!-- Vague Examples -->
+            <button class="collapsible" onclick="toggleCollapsible(this)">
+                ❓ Ví Dụ Prompts Mơ Hồ (0 mẫu)
+                <span>▼</span>
+            </button>
+            <div class="collapsible-content">
+                <ul class="example-list">
+                    
+                </ul>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p><strong>Dashboard Phân Tích Hiệu Quả Prompt - Phòng Claude Log</strong></p>
+            <p>Ngày tạo: 09/03/2026 | Kỳ báo cáo: 25/11/2025 - 06/03/2026</p>
+            <p style="margin-top: 10px; font-size: 12px;">
+                Tiêu chí đánh giá: Lặp lại (40%) + Code Dump (30%) + Mơ hồ (30%) |
+                TỐT ≥80 | TRUNG BÌNH 60-79 | CẦN CẢI THIỆN &lt;60
+            </p>
+        </div>
+    </div>
+
+    <script>
+        function toggleCollapsible(element) {
+            const content = element.nextElementSibling;
+            const arrow = element.querySelector('span');
+            if (content.classList.contains('active')) {
+                content.classList.remove('active');
+                arrow.textContent = '▼';
+            } else {
+                content.classList.add('active');
+                arrow.textContent = '▲';
+            }
+        }
+        function toggleProjectList() {
+            const content = document.getElementById('projectListContent');
+            const icon = document.getElementById('projectToggleIcon');
+            content.classList.toggle('collapsed');
+            icon.classList.toggle('collapsed');
+        }
+        var _projPageSize = 20;
+        var _projCurrentPage = 1;
+        function projGoToPage(page) {
+            var items = document.querySelectorAll('#projectGrid .project-tag');
+            var total = items.length;
+            var totalPages = Math.ceil(total / _projPageSize);
+            if (page < 1) page = 1;
+            if (page > totalPages) page = totalPages;
+            _projCurrentPage = page;
+            var start = (page - 1) * _projPageSize;
+            var end = start + _projPageSize;
+            for (var i = 0; i < total; i++) {
+                items[i].style.display = (i >= start && i < end) ? '' : 'none';
+            }
+            var btns = document.querySelectorAll('.proj-pagination button[data-page]');
+            btns.forEach(function(b) {
+                b.classList.toggle('active', parseInt(b.getAttribute('data-page')) === page);
+            });
+            var prev = document.getElementById('projPrev');
+            var next = document.getElementById('projNext');
+            if (prev) prev.disabled = (page <= 1);
+            if (next) next.disabled = (page >= totalPages);
+        }
+        document.addEventListener('DOMContentLoaded', function() {
+            if (document.getElementById('projectGrid')) projGoToPage(1);
+        });
+    </script>
+
+    <script>
+    // Convert canvas charts to images for print
+    window.addEventListener('beforeprint', function() {
+        document.querySelectorAll('canvas').forEach(function(canvas) {
+            if (canvas.dataset.printDone) return;
+            try {
+                var img = new Image();
+                img.src = canvas.toDataURL('image/png');
+                img.style.width = '100%';
+                img.style.height = '100%';
+                img.className = 'print-chart-img';
+                canvas.style.display = 'none';
+                canvas.parentNode.insertBefore(img, canvas.nextSibling);
+                canvas.dataset.printDone = '1';
+            } catch(e) {}
+        });
+    });
+    window.addEventListener('afterprint', function() {
+        document.querySelectorAll('.print-chart-img').forEach(function(img) {
+            img.previousElementSibling.style.display = '';
+            delete img.previousElementSibling.dataset.printDone;
+            img.remove();
+        });
+    });
+    </script>
+</body>
+</html>
