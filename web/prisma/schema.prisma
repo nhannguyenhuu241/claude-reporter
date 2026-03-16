@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -18,27 +18,29 @@ model Department {
 }
 
 model User {
-  id           String      @id @default(uuid())
-  email        String      @unique
-  createdAt    DateTime    @default(now()) @map("created_at")
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String?  @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
 
-  role         String      @default("member") // member | dept_head
+  role String @default("member") // member | dept_head
 
   departmentId String?     @map("department_id")
   department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
 
   sessions Session[]
 
+  @@index([departmentId])
   @@map("users")
 }
 
 model Session {
-  id          String   @id // Claude's session_id
-  machineId   String   @default("unknown") @map("machine_id")
-  projectPath String?  @map("project_path")
+  id          String    @id // Claude's session_id
+  machineId   String    @default("unknown") @map("machine_id")
+  projectPath String?   @map("project_path")
   model       String?
-  status      String   @default("active") // active | completed | error
-  startedAt   DateTime @default(now()) @map("started_at")
+  status      String    @default("active") // active | completed | error
+  startedAt   DateTime  @default(now()) @map("started_at")
   endedAt     DateTime? @map("ended_at")
 
   // User identification (nullable for backward compat)
@@ -46,22 +48,29 @@ model Session {
   user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   // Aggregated token usage (updated on each PostToolUse / Stop)
-  inputTokens          Int @default(0) @map("input_tokens")
-  outputTokens         Int @default(0) @map("output_tokens")
-  cacheCreationTokens  Int @default(0) @map("cache_creation_tokens")
-  cacheReadTokens      Int @default(0) @map("cache_read_tokens")
+  inputTokens         Int @default(0) @map("input_tokens")
+  outputTokens        Int @default(0) @map("output_tokens")
+  cacheCreationTokens Int @default(0) @map("cache_creation_tokens")
+  cacheReadTokens     Int @default(0) @map("cache_read_tokens")
 
   events Event[]
 
   @@index([userId])
+  @@index([userId, startedAt]) // composite for filtered + ordered report queries
+  @@index([startedAt]) // date-range queries without userId filter
   @@map("sessions")
 }
 
 model Event {
-  id         Int      @id @default(autoincrement())
-  sessionId  String   @map("session_id")
-  eventType  String   @map("event_type")
-  timestamp  DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  sessionId String   @map("session_id")
+  eventType String   @map("event_type")
+  timestamp DateTime @default(now())
+
+  // Deduplication key: transcript UUID from Claude's JSONL.
+  // If set, (sessionId + entryUuid) must be unique — prevents duplicate inserts on replay.
+  // NULL = live event with no UUID (old behaviour, always inserted).
+  entryUuid String? @map("entry_uuid")
 
   userPrompt String? @map("user_prompt")
 
@@ -79,8 +88,13 @@ model Event {
 
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
+  // SQLite treats each NULL as distinct in a UNIQUE constraint, so events with
+  // entryUuid=NULL are never blocked — only non-null UUIDs are deduplicated.
+  @@unique([sessionId, entryUuid])
   @@index([sessionId])
   @@index([eventType])
   @@index([timestamp])
+  @@index([timestamp, sessionId]) // composite for time-range + session filter in report queries
+  @@index([eventType, timestamp]) // prompt-quality & team report: WHERE eventType=? AND timestamp BETWEEN ? AND ?
   @@map("events")
 }
