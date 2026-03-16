@@ -376,7 +376,6 @@ export default function AdminPage() {
           { label: "Sessions (đã link)", value: users.reduce((s, u) => s + u.totalSessions, 0), color: "var(--green)" },
           { label: "Sessions (ẩn danh)", value: anonymousSessions, color: "var(--text-muted)", note: "chưa link UUID" },
           { label: "Total Tokens", value: fmt(totalTokens), color: "var(--yellow)" },
-          { label: "Total Cost", value: `$${totalCost.toFixed(2)}`, color: "#f97316" },
           { label: "Projects", value: projects.length, color: "#34d399" },
         ].map((c) => (
           <div key={c.label} className="card" style={{ padding: "0.75rem 1rem" }}>
@@ -472,7 +471,6 @@ export default function AdminPage() {
                     <th style={{ textAlign: "left", padding: "6px 8px" }}>Phòng ban</th>
                     <th style={{ textAlign: "right", padding: "6px 8px" }}>Thành viên</th>
                     <th style={{ textAlign: "right", padding: "6px 8px" }}>Tokens</th>
-                    <th style={{ textAlign: "right", padding: "6px 8px" }}>Cost</th>
                     <th style={{ textAlign: "left", padding: "6px 8px" }}>Users</th>
                     <th style={{ textAlign: "right", padding: "6px 8px" }}>Actions</th>
                   </tr>
@@ -509,9 +507,6 @@ export default function AdminPage() {
                         </td>
                         <td style={{ padding: "7px 8px", textAlign: "right", color: "var(--yellow)" }}>
                           {fmt(d.totalTokens)}
-                        </td>
-                        <td style={{ padding: "7px 8px", textAlign: "right", color: "#f97316" }}>
-                          ${d.estimatedCostUsd.toFixed(2)}
                         </td>
                         <td style={{ padding: "7px 8px" }}>
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
@@ -573,7 +568,6 @@ export default function AdminPage() {
                   <th style={{ textAlign: "left", padding: "6px 8px" }}>Vai trò</th>
                   <th style={{ textAlign: "right", padding: "6px 8px" }}>Sessions</th>
                   <th style={{ textAlign: "right", padding: "6px 8px" }}>Tokens</th>
-                  <th style={{ textAlign: "right", padding: "6px 8px" }}>Cost</th>
                   <th style={{ textAlign: "right", padding: "6px 8px" }}>Last active</th>
                 </tr>
               </thead>
@@ -628,9 +622,6 @@ export default function AdminPage() {
                     <td style={{ padding: "7px 8px", textAlign: "right", color: "var(--yellow)" }}>
                       {fmt(u.totalTokens)}
                     </td>
-                    <td style={{ padding: "7px 8px", textAlign: "right", color: "#f97316" }}>
-                      ${u.estimatedCostUsd.toFixed(2)}
-                    </td>
                     <td style={{ padding: "7px 8px", textAlign: "right", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
                       {relTime(u.lastActiveAt)}
                     </td>
@@ -679,7 +670,6 @@ export default function AdminPage() {
                   <th style={{ textAlign: "right", padding: "6px 8px" }}>Sessions</th>
                   <th style={{ textAlign: "right", padding: "6px 8px" }}>Events</th>
                   <th style={{ textAlign: "right", padding: "6px 8px" }}>Tokens</th>
-                  <th style={{ textAlign: "right", padding: "6px 8px" }}>Cost</th>
                   <th style={{ textAlign: "left", padding: "6px 8px" }}>Users</th>
                   <th style={{ textAlign: "right", padding: "6px 8px" }}>Last active</th>
                 </tr>
@@ -706,7 +696,6 @@ export default function AdminPage() {
                     <td style={{ padding: "7px 8px", textAlign: "right" }}>{p.sessions}</td>
                     <td style={{ padding: "7px 8px", textAlign: "right", color: "var(--text-muted)" }}>{fmt(p.events)}</td>
                     <td style={{ padding: "7px 8px", textAlign: "right", color: "var(--yellow)" }}>{fmt(p.totalTokens)}</td>
-                    <td style={{ padding: "7px 8px", textAlign: "right", color: "#f97316" }}>${p.estimatedCostUsd.toFixed(2)}</td>
                     <td style={{ padding: "7px 8px" }}>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
                         {p.users.map((u) => (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, use } from "react";
+import { useEffect, useRef, useState, use, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { io, Socket } from "socket.io-client";
@@ -19,6 +19,14 @@ interface Event {
   outputTokens?: number;
 }
 
+interface Pagination {
+  page: number;
+  limit: number;
+  totalEvents: number;
+  totalPages: number;
+  hasMore: boolean;
+}
+
 interface Session {
   id: string;
   machineId: string;
@@ -31,7 +39,9 @@ interface Session {
   outputTokens: number;
   cacheCreationTokens: number;
   cacheReadTokens: number;
+  _count: { events: number };
   events: Event[];
+  pagination: Pagination;
 }
 
 const EVENT_ICONS: Record<string, string> = {
@@ -61,38 +71,48 @@ export default function SessionPage({
   const router = useRouter();
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(1);
   const socketRef = useRef<Socket | null>(null);
+  const eventIdsRef = useRef<Set<number>>(new Set());
 
-  useEffect(() => {
+  const fetchPage = useCallback(async (pageNum: number, replace = false) => {
     const userId = localStorage.getItem("claude-reporter-uuid");
-    const qs = userId ? `?userId=${encodeURIComponent(userId)}` : "";
+    const qs = new URLSearchParams({ page: String(pageNum), limit: "100" });
+    if (userId) qs.set("userId", userId);
 
-    fetch(`/api/sessions/${id}${qs}`)
-      .then((r) => {
-        if (!r.ok) {
-          router.replace("/");
-          return null;
-        }
-        return r.json();
-      })
-      .then((data) => {
-        if (data) setSession(data);
-      })
-      .finally(() => setLoading(false));
+    const res = await fetch(`/api/sessions/${id}?${qs}`);
+    if (!res.ok) { router.replace("/"); return; }
+    const data: Session = await res.json();
+
+    if (replace) {
+      eventIdsRef.current = new Set(data.events.map((e) => e.id));
+      setSession(data);
+    } else {
+      setSession((prev) => {
+        if (!prev) return data;
+        const newEvents = data.events.filter((e) => !eventIdsRef.current.has(e.id));
+        newEvents.forEach((e) => eventIdsRef.current.add(e.id));
+        return { ...data, events: [...prev.events, ...newEvents] };
+      });
+    }
+    setPage(pageNum);
   }, [id, router]);
 
-  // Subscribe to the session room so real-time events (including tool events)
-  // are streamed directly to this page without going through the global live feed.
+  useEffect(() => {
+    fetchPage(1, true).finally(() => setLoading(false));
+  }, [fetchPage]);
+
+  // Real-time: subscribe to session room for live events
   useEffect(() => {
     const socket = io({ path: "/socket.io" });
     socketRef.current = socket;
-    socket.on("connect", () => {
-      socket.emit("subscribe", { sessionId: id });
-    });
+    socket.on("connect", () => socket.emit("subscribe", { sessionId: id }));
     socket.on("event", ({ event }: { event: Event }) => {
+      if (eventIdsRef.current.has(event.id)) return;
+      eventIdsRef.current.add(event.id);
       setSession((prev) => {
         if (!prev) return prev;
-        if (prev.events.some((e) => e.id === event.id)) return prev; // deduplicate
         return { ...prev, events: [...prev.events, event] };
       });
     });
@@ -102,6 +122,16 @@ export default function SessionPage({
       socketRef.current = null;
     };
   }, [id]);
+
+  async function loadMore() {
+    if (!session?.pagination.hasMore || loadingMore) return;
+    setLoadingMore(true);
+    try {
+      await fetchPage(page + 1);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -118,6 +148,8 @@ export default function SessionPage({
   const estimatedCost =
     (session.inputTokens * 3 + session.outputTokens * 15 + session.cacheCreationTokens * 3.75 + session.cacheReadTokens * 0.3) /
     1_000_000;
+
+  const { pagination } = session;
 
   return (
     <div>
@@ -161,14 +193,13 @@ export default function SessionPage({
               </div>
             </div>
             <div>
-              <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>Est. Cost</div>
-              <div style={{ fontSize: "0.85rem", color: "#f97316" }}>
-                ${estimatedCost.toFixed(4)}
-              </div>
-            </div>
-            <div>
               <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>Events</div>
-              <div style={{ fontSize: "0.85rem" }}>{session.events.length}</div>
+              <div style={{ fontSize: "0.85rem" }}>
+                {session.events.length}
+                {pagination.totalEvents > session.events.length && (
+                  <span style={{ color: "var(--text-muted)" }}> / {pagination.totalEvents}</span>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -176,7 +207,12 @@ export default function SessionPage({
 
       {/* Event timeline */}
       <div className="card">
-        <div style={{ fontWeight: 600, marginBottom: "0.75rem" }}>Event Timeline</div>
+        <div style={{ fontWeight: 600, marginBottom: "0.75rem" }}>
+          Event Timeline
+          <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: "0.75rem", marginLeft: 8 }}>
+            Hiển thị {session.events.length} / {pagination.totalEvents} events
+          </span>
+        </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           {session.events.map((e) => (
             <div
@@ -188,21 +224,12 @@ export default function SessionPage({
                 padding: "0.5rem 0.75rem",
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  marginBottom: 4,
-                  fontSize: "0.75rem",
-                }}
-              >
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: "0.75rem" }}>
                 <span>
                   {EVENT_ICONS[e.eventType] ?? "•"}{" "}
                   <strong>{e.toolName ?? e.eventType}</strong>
                   {e.toolDurationMs && (
-                    <span style={{ color: "var(--text-muted)", marginLeft: 8 }}>
-                      {e.toolDurationMs}ms
-                    </span>
+                    <span style={{ color: "var(--text-muted)", marginLeft: 8 }}>{e.toolDurationMs}ms</span>
                   )}
                 </span>
                 <span style={{ color: "var(--text-muted)" }}>
@@ -215,49 +242,19 @@ export default function SessionPage({
                 </span>
               </div>
               {e.userPrompt && (
-                <pre
-                  style={{
-                    margin: 0,
-                    fontSize: "0.75rem",
-                    color: "var(--green)",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  {e.userPrompt.slice(0, 500)}
-                  {e.userPrompt.length > 500 && "…"}
+                <pre style={{ margin: 0, fontSize: "0.75rem", color: "var(--green)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {e.userPrompt.slice(0, 500)}{e.userPrompt.length > 500 && "…"}
                 </pre>
               )}
               {e.assistantMessage && (
-                <pre
-                  style={{
-                    margin: 0,
-                    fontSize: "0.75rem",
-                    color: "var(--text)",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  {e.assistantMessage.slice(0, 500)}
-                  {e.assistantMessage.length > 500 && "…"}
+                <pre style={{ margin: 0, fontSize: "0.75rem", color: "var(--text)", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                  {e.assistantMessage.slice(0, 500)}{e.assistantMessage.length > 500 && "…"}
                 </pre>
               )}
               {e.toolInput && (
                 <details style={{ marginTop: 4 }}>
-                  <summary style={{ fontSize: "0.7rem", color: "var(--text-muted)", cursor: "pointer" }}>
-                    Input
-                  </summary>
-                  <pre
-                    style={{
-                      margin: "4px 0 0",
-                      fontSize: "0.7rem",
-                      color: "var(--text-muted)",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                      maxHeight: 200,
-                      overflowY: "auto",
-                    }}
-                  >
+                  <summary style={{ fontSize: "0.7rem", color: "var(--text-muted)", cursor: "pointer" }}>Input</summary>
+                  <pre style={{ margin: "4px 0 0", fontSize: "0.7rem", color: "var(--text-muted)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 200, overflowY: "auto" }}>
                     {e.toolInput.slice(0, 2000)}
                   </pre>
                 </details>
@@ -265,6 +262,25 @@ export default function SessionPage({
             </div>
           ))}
         </div>
+
+        {/* Load more */}
+        {pagination.hasMore && (
+          <div style={{ textAlign: "center", marginTop: "1rem" }}>
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              style={{
+                background: loadingMore ? "var(--surface)" : "var(--accent)",
+                color: "#fff", border: "none", borderRadius: 6,
+                padding: "0.45rem 1.5rem", fontWeight: 600,
+                fontSize: "0.85rem", cursor: loadingMore ? "default" : "pointer",
+                opacity: loadingMore ? 0.7 : 1,
+              }}
+            >
+              {loadingMore ? "Đang tải…" : `Tải thêm (${pagination.totalEvents - session.events.length} còn lại)`}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

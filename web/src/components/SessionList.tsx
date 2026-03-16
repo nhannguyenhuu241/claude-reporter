@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import Link from "next/link";
 
@@ -69,7 +69,7 @@ function ProjectBlock({
   showUser: boolean;
   indent?: boolean;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const name = projectName(projectKey === "__none__" ? null : projectKey);
   const totalTokens = sessions.reduce((s, x) => s + (x.inputTokens ?? 0) + (x.outputTokens ?? 0), 0);
   const activeCount = sessions.filter((x) => x.status === "active").length;
@@ -148,7 +148,7 @@ function UserBlock({ userId, email, sessions, updatedIds }: {
   sessions: Session[];
   updatedIds: Set<string>;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const totalTokens = sessions.reduce((s, x) => s + (x.inputTokens ?? 0) + (x.outputTokens ?? 0), 0);
   const activeCount = sessions.filter((x) => x.status === "active").length;
   const projectGroups = groupByProject(sessions);
@@ -261,23 +261,27 @@ export function SessionList({ adminMode = false }: { adminMode?: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Group by user (admin/dept) or by project (personal)
-  const userGroups = isGroupedMode
-    ? Object.entries(
-        sessions.reduce((acc, s) => {
-          const key = s.userId ?? "__anon__";
-          if (!acc[key]) acc[key] = { email: s.user?.email ?? null, sessions: [] };
-          acc[key].sessions.push(s);
-          return acc;
-        }, {} as Record<string, { email: string | null; sessions: Session[] }>)
-      ).sort(([, a], [, b]) => {
-        const bTime = b.sessions[0]?.startedAt ? new Date(b.sessions[0].startedAt).getTime() : 0;
-        const aTime = a.sessions[0]?.startedAt ? new Date(a.sessions[0].startedAt).getTime() : 0;
-        return bTime - aTime;
-      })
-    : null;
+  // Group by user (admin/dept) or by project (personal) — memoized to avoid recalculation on every render
+  const userGroups = useMemo(() => {
+    if (!isGroupedMode) return null;
+    return Object.entries(
+      sessions.reduce((acc, s) => {
+        const key = s.userId ?? "__anon__";
+        if (!acc[key]) acc[key] = { email: s.user?.email ?? null, sessions: [] };
+        acc[key].sessions.push(s);
+        return acc;
+      }, {} as Record<string, { email: string | null; sessions: Session[] }>)
+    ).sort(([, a], [, b]) => {
+      const bTime = b.sessions[0]?.startedAt ? new Date(b.sessions[0].startedAt).getTime() : 0;
+      const aTime = a.sessions[0]?.startedAt ? new Date(a.sessions[0].startedAt).getTime() : 0;
+      return bTime - aTime;
+    });
+  }, [sessions, isGroupedMode]);
 
-  const projectGroups = !isGroupedMode ? groupByProject(sessions) : null;
+  const projectGroups = useMemo(
+    () => (!isGroupedMode ? groupByProject(sessions) : null),
+    [sessions, isGroupedMode]
+  );
 
   return (
     <div className="card">

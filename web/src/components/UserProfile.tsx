@@ -132,29 +132,6 @@ export function UserProfile() {
   // ── Logged in ───────────────────────────────────────────────────────────────
   return (
     <div style={{ marginBottom: "1.5rem" }}>
-      {/* Dept head banner */}
-      {stats.role === "dept_head" && (
-        <div style={{
-          background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.3)",
-          borderRadius: 8, padding: "0.6rem 1rem", marginBottom: "0.75rem",
-          display: "flex", alignItems: "center", gap: "0.75rem",
-        }}>
-          <span style={{ fontSize: "1rem" }}>👑</span>
-          <div style={{ flex: 1, fontSize: "0.82rem" }}>
-            <strong style={{ color: "#eab308" }}>Trưởng phòng {stats.department?.name}</strong>
-            <span style={{ color: "var(--text-muted)", marginLeft: 8 }}>
-              — Bạn có thể xem dashboard cá nhân bên dưới và xem báo cáo phòng ban.
-            </span>
-          </div>
-          <Link href="/dept" style={{
-            background: "#eab308", color: "#000", borderRadius: 6,
-            padding: "0.35rem 0.9rem", fontSize: "0.78rem", fontWeight: 700,
-            textDecoration: "none", whiteSpace: "nowrap",
-          }}>
-            Báo cáo phòng →
-          </Link>
-        </div>
-      )}
 
       <div
         className="card"
@@ -218,7 +195,6 @@ export function UserProfile() {
             { label: "Sessions", value: stats.totalSessions, sub: `${stats.activeSessions} active` },
             { label: "Tokens", value: fmt(stats.totalTokens), sub: "total usage" },
             { label: "24h Events", value: fmt(stats.recentActivity24h), sub: "recent activity" },
-            { label: "Est. Cost", value: `$${stats.estimatedCostUsd.toFixed(2)}`, sub: "Sonnet 4.6" },
           ].map((item) => (
             <div key={item.label}>
               <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{item.label}</div>
@@ -238,7 +214,7 @@ export function UserProfile() {
               textDecoration: "none", whiteSpace: "nowrap",
             }}
           >
-            Export Report
+            Thông tin phân tích
           </Link>
         </div>
       </div>

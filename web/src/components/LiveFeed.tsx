@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 
 interface LiveEvent {
@@ -342,20 +342,23 @@ export function LiveFeed() {
     return () => { socket.disconnect(); socketRef.current = null; };
   }, [mergeEvents]);
 
-  // Group by project path; sessions with no projectPath each get their own group keyed by sessionId
-  const visibleEvents = events.filter((e) => VISIBLE_EVENTS.has(e.eventType));
-  const groups: ProjectGroup[] = [];
-  const projectMap = new Map<string, ProjectGroup>();
-  for (const e of visibleEvents) {
-    const path = e.session?.projectPath ?? null;
-    const key = path ?? `__session__${e.sessionId}`;
-    if (!projectMap.has(key)) {
-      const g: ProjectGroup = { key, project: projectName(path, e.sessionId), projectPath: path, events: [] };
-      projectMap.set(key, g);
-      groups.push(g);
+  // Group by project path — memoized to avoid rebuilding on every render
+  const groups = useMemo(() => {
+    const visibleEvents = events.filter((e) => VISIBLE_EVENTS.has(e.eventType));
+    const result: ProjectGroup[] = [];
+    const projectMap = new Map<string, ProjectGroup>();
+    for (const e of visibleEvents) {
+      const path = e.session?.projectPath ?? null;
+      const key = path ?? `__session__${e.sessionId}`;
+      if (!projectMap.has(key)) {
+        const g: ProjectGroup = { key, project: projectName(path, e.sessionId), projectPath: path, events: [] };
+        projectMap.set(key, g);
+        result.push(g);
+      }
+      projectMap.get(key)!.events.push(e);
     }
-    projectMap.get(key)!.events.push(e);
-  }
+    return result;
+  }, [events]);
 
   return (
     <>
@@ -421,13 +424,28 @@ export function LiveFeed() {
                     </span>
                   </button>
 
-                  {!isCollapsed && (
-                    <div style={{ maxHeight: 400, overflowY: "auto", padding: "6px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
-                      {g.events.map((e) => (
-                        <EventCard key={e.id} e={e} onDetail={setDetail} />
-                      ))}
-                    </div>
-                  )}
+                  {!isCollapsed && (() => {
+                    const RENDER_LIMIT = 50;
+                    const showAll = collapsed[`${key}__all`] ?? false;
+                    const rendered = showAll ? g.events : g.events.slice(0, RENDER_LIMIT);
+                    return (
+                      <div style={{ padding: "6px 8px" }}>
+                        <div style={{ maxHeight: 400, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                          {rendered.map((e) => (
+                            <EventCard key={e.id} e={e} onDetail={setDetail} />
+                          ))}
+                        </div>
+                        {!showAll && g.events.length > RENDER_LIMIT && (
+                          <button
+                            onClick={() => setCollapsed((prev) => ({ ...prev, [`${key}__all`]: true }))}
+                            style={{ width: "100%", marginTop: 6, padding: "4px 0", background: "none", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text-muted)", fontSize: "0.7rem", cursor: "pointer" }}
+                          >
+                            + {g.events.length - RENDER_LIMIT} events nữa
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}

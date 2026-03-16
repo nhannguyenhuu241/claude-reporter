@@ -66,12 +66,6 @@ export function StatsCards() {
       sub: `In ${fmt(stats.tokenBreakdown.input)} · Out ${fmt(stats.tokenBreakdown.output)}`,
       color: "var(--yellow)",
     },
-    {
-      label: "Est. Cost",
-      value: `$${stats.estimatedCostUsd.toFixed(2)}`,
-      sub: "Sonnet 4.6 pricing",
-      color: "#f97316",
-    },
   ];
 
   return (

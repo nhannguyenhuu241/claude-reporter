@@ -54,8 +54,20 @@ function daysAgo(n: number) {
   return d.toISOString().slice(0, 10);
 }
 function escapeHtml(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  if (s == null) return "";
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function effColor(v: number) {
@@ -69,146 +81,390 @@ function effLabel(v: number) {
   return "Thấp";
 }
 
-// ─── Project report HTML export ───────────────────────────────────────────────
+// ─── Project report HTML export — dựa theo center_summary_template ────────────
 
 function exportProjectHTML(data: ReportData, from: string, to: string) {
-  const rows = data.projects.map((p) => `
-    <tr>
-      <td><strong>${escapeHtml(p.name)}</strong><br><small style="color:#888">${escapeHtml(p.path)}</small></td>
+  const projectRows = data.projects.map((p, i) => {
+    const totalTok = p.totalTokens;
+    return `<tr>
+      <td><span class="rank-badge ${i === 0 ? "rank-1" : i === 1 ? "rank-2" : i === 2 ? "rank-3" : "rank-other"}">${i + 1}</span></td>
+      <td><strong>${escapeHtml(p.name)}</strong><br><small style="color:#888;font-family:monospace;font-size:11px">${escapeHtml(p.path)}</small></td>
       <td style="text-align:right">${p.sessions}</td>
       <td style="text-align:right">${p.events}</td>
-      <td style="text-align:right">${fmt(p.totalTokens)}</td>
-      <td style="text-align:right">$${p.estimatedCostUsd.toFixed(4)}</td>
-      <td>${p.users.map(escapeHtml).join(", ") || "—"}</td>
-    </tr>`).join("");
+      <td style="text-align:right">
+        <div style="display:flex;align-items:center;gap:8px;justify-content:flex-end">
+          <div class="score-bar"><div class="score-bar-fill good" style="width:${data.totalTokens > 0 ? Math.min((totalTok / data.totalTokens) * 100, 100).toFixed(0) : 0}%"></div></div>
+          <strong style="color:#1a1a2e">${fmt(totalTok)}</strong>
+        </div>
+      </td>
+      <td>${p.users.map(escapeHtml).join(", ") || "<span style='color:#aaa'>—</span>"}</td>
+      <td style="text-align:right;color:#888;font-size:12px">${p.lastActivity ? new Date(p.lastActivity).toLocaleDateString("vi-VN") : "—"}</td>
+    </tr>`;
+  }).join("");
 
-  const html = `<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8">
-<title>Claude Reporter - ${from} → ${to}</title>
+  const html = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude Reporter — Báo Cáo Cá Nhân ${from} → ${to}</title>
 <style>
-  body{font-family:-apple-system,sans-serif;max-width:960px;margin:40px auto;padding:0 20px;color:#e2e8f0;background:#0a0a0a}
-  h1{color:#818cf8}h2{color:#94a3b8;font-size:1rem;font-weight:400;margin-top:0}
-  .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin:24px 0}
-  .card{background:#1a1a2e;border:1px solid #2d2d3d;border-radius:8px;padding:16px}
-  .card-val{font-size:2rem;font-weight:700;color:#818cf8}.card-label{font-size:.75rem;color:#64748b}
-  table{width:100%;border-collapse:collapse;margin-top:24px}
-  th{text-align:left;padding:8px 12px;color:#64748b;font-size:.8rem;border-bottom:1px solid #2d2d3d}
-  td{padding:8px 12px;border-bottom:1px solid #1e1e2e;font-size:.85rem}
-  tr:hover td{background:#1a1a2e}
-</style></head><body>
-<h1>◆ Claude Reporter</h1>
-<h2>Report: ${from} → ${to}</h2>
-<div class="cards">
-  <div class="card"><div class="card-label">Sessions</div><div class="card-val">${data.totalSessions}</div></div>
-  <div class="card"><div class="card-label">Tokens</div><div class="card-val">${fmt(data.totalTokens)}</div></div>
-  <div class="card"><div class="card-label">Events</div><div class="card-val">${fmt(data.totalEvents)}</div></div>
-  <div class="card"><div class="card-label">Est. Cost</div><div class="card-val">$${data.estimatedCostUsd.toFixed(2)}</div></div>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#0f2027 0%,#203a43 50%,#2c5364 100%);min-height:100vh;padding:20px;color:#333}
+  .container{max-width:1200px;margin:0 auto}
+  .header{background:linear-gradient(135deg,#1a1a2e 0%,#16213e 50%,#0f3460 100%);color:white;padding:40px;border-radius:20px;margin-bottom:25px;box-shadow:0 15px 50px rgba(0,0,0,0.4);text-align:center}
+  .header h1{font-size:32px;margin-bottom:8px}
+  .header .subtitle{font-size:15px;opacity:.8}
+  .header-stats{display:flex;justify-content:center;gap:24px;margin-top:25px;flex-wrap:wrap}
+  .header-stat{background:rgba(255,255,255,0.1);padding:18px 28px;border-radius:12px;backdrop-filter:blur(10px);min-width:120px;text-align:center}
+  .header-stat span{font-size:12px;opacity:.9;display:block}
+  .header-stat strong{display:block;font-size:24px;margin-top:6px}
+  .grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-bottom:25px}
+  @media(max-width:900px){.grid-4{grid-template-columns:repeat(2,1fr)}}
+  @media(max-width:500px){.grid-4{grid-template-columns:1fr}}
+  .card{background:white;border-radius:15px;padding:25px;box-shadow:0 5px 20px rgba(0,0,0,0.1);transition:transform .3s}
+  .card:hover{transform:translateY(-3px)}
+  .card-title{font-size:12px;color:#666;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}
+  .card-value{font-size:30px;font-weight:bold;color:#1a1a2e}
+  .card-value.good{color:#28a745}.card-value.warning{color:#fd7e14}.card-value.danger{color:#dc3545}
+  .card-subtitle{font-size:12px;color:#888;margin-top:5px}
+  .section{background:white;border-radius:15px;padding:25px;margin-bottom:25px;box-shadow:0 5px 20px rgba(0,0,0,0.1)}
+  .section-title{font-size:17px;font-weight:bold;color:#1a1a2e;margin-bottom:20px;padding-bottom:10px;border-bottom:2px solid #eee;display:flex;align-items:center;gap:10px}
+  table{width:100%;border-collapse:collapse}
+  th{background:linear-gradient(135deg,#1a1a2e,#16213e);color:white;padding:13px 12px;text-align:left;font-weight:600;font-size:13px}
+  th:first-child{border-radius:8px 0 0 0}th:last-child{border-radius:0 8px 0 0}
+  td{padding:13px 12px;border-bottom:1px solid #eee;font-size:14px}
+  tr:hover td{background:#f8f9fa}
+  .rank-badge{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;font-weight:bold;font-size:12px}
+  .rank-1{background:linear-gradient(135deg,#ffd700,#ffb700);color:#333}
+  .rank-2{background:linear-gradient(135deg,#c0c0c0,#a0a0a0);color:#333}
+  .rank-3{background:linear-gradient(135deg,#cd7f32,#b87333);color:white}
+  .rank-other{background:#e9ecef;color:#666}
+  .score-bar{height:7px;background:#e9ecef;border-radius:4px;overflow:hidden;width:80px;display:inline-block;vertical-align:middle;margin-right:6px}
+  .score-bar-fill{height:100%;border-radius:4px}
+  .score-bar-fill.good{background:linear-gradient(90deg,#28a745,#20c997)}
+  .footer{text-align:center;padding:20px;color:rgba(255,255,255,.7);font-size:12px}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  @media print{body{background:white!important;padding:10px!important}.section{break-inside:avoid}.header{break-inside:avoid}.print-btn{display:none!important}}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>◆ Claude Reporter — Báo Cáo Cá Nhân</h1>
+    <div class="subtitle">Kỳ báo cáo: ${from} → ${to} | Xuất lúc ${new Date().toLocaleString("vi-VN")}</div>
+    <div class="header-stats">
+      <div class="header-stat"><span>Sessions</span><strong>${data.totalSessions}</strong></div>
+      <div class="header-stat"><span>Tổng Tokens</span><strong>${fmt(data.totalTokens)}</strong></div>
+      <div class="header-stat"><span>Events</span><strong>${fmt(data.totalEvents)}</strong></div>
+      <div class="header-stat"><span>Projects</span><strong>${data.projects.length}</strong></div>
+    </div>
+  </div>
+
+  <div class="grid-4">
+    <div class="card">
+      <div class="card-title">Tổng Sessions</div>
+      <div class="card-value">${data.totalSessions}</div>
+      <div class="card-subtitle">Trong kỳ báo cáo</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Tổng Tokens</div>
+      <div class="card-value">${fmt(data.totalTokens)}</div>
+      <div class="card-subtitle">Input + Output + Cache</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Tổng Events</div>
+      <div class="card-value">${fmt(data.totalEvents)}</div>
+      <div class="card-subtitle">Tool calls + messages</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Dự Án</div>
+      <div class="card-value">${data.projects.length}</div>
+      <div class="card-subtitle">Project đã làm việc</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">📁 Danh Sách Dự Án</div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th style="width:40px">#</th>
+          <th>Dự Án</th>
+          <th style="text-align:right">Sessions</th>
+          <th style="text-align:right">Events</th>
+          <th style="text-align:right">Tokens</th>
+          <th>Users</th>
+          <th style="text-align:right">Hoạt động cuối</th>
+        </tr></thead>
+        <tbody>${projectRows}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="footer">
+    <strong>Claude Reporter — Báo Cáo Cá Nhân</strong><br>
+    Ngày tạo: ${new Date().toLocaleString("vi-VN")} | Kỳ báo cáo: ${from} → ${to}
+  </div>
 </div>
-<table><thead><tr>
-  <th>Project</th><th style="text-align:right">Sessions</th><th style="text-align:right">Events</th>
-  <th style="text-align:right">Tokens</th><th style="text-align:right">Cost</th><th>Users</th>
-</tr></thead><tbody>${rows}</tbody></table>
-<p style="color:#64748b;font-size:.75rem;margin-top:32px">Generated · ${new Date().toLocaleString()}</p>
 </body></html>`;
 
-  const blob = new Blob([html], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = `claude-project-report-${from}-${to}.html`; a.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(new Blob([html], { type: "text/html" }), `claude-personal-report-${from}-${to}.html`);
 }
 
-// ─── Team report HTML export (like Claude Log.md) ─────────────────────────────
+// ─── Team report HTML export — dựa theo dashboard_template ────────────────────
 
 function exportTeamHTML(data: TeamReportData, from: string, to: string) {
-  const memberSections = data.members.map((m, idx) => {
+  const avgEfficiency = data.members.length > 0
+    ? Math.round(data.members.reduce((s, m) => s + m.promptEfficiency, 0) / data.members.length)
+    : 0;
+  const topPerformer = data.members.length > 0
+    ? data.members.reduce((best, m) => m.promptEfficiency > best.promptEfficiency ? m : best, data.members[0])
+    : null;
+  const avgRepetition = data.members.length > 0
+    ? Math.round(data.members.reduce((s, m) => s + (100 - m.promptEfficiency), 0) / data.members.length)
+    : 0;
+
+  const effColor = (v: number) => v >= 80 ? "#28a745" : v >= 60 ? "#fd7e14" : "#dc3545";
+  const effClass = (v: number) => v >= 80 ? "good" : v >= 60 ? "warning" : "danger";
+  const rankBadge = (i: number) => i === 0 ? "rank-1" : i === 1 ? "rank-2" : i === 2 ? "rank-3" : "rank-other";
+
+  const memberRows = data.members.map((m, i) => {
+    const eff = m.promptEfficiency;
+    return `<tr>
+      <td><span class="rank-badge ${rankBadge(i)}">${i + 1}</span></td>
+      <td>
+        <div class="member-name">${escapeHtml(m.email)}</div>
+        <div style="font-size:12px;color:#888">${m.activeDays} ngày hoạt động</div>
+      </td>
+      <td style="text-align:right">${m.totalPrompts.toLocaleString()}<br><small style="color:#888">${m.meaningfulPrompts} meaningful</small></td>
+      <td>${fmt(m.totalTokens)}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="progress-bar"><div class="progress-fill ${effClass(eff)}" style="width:${eff}%"></div></div>
+          <strong style="color:${effColor(eff)}">${eff}%</strong>
+        </div>
+        <div style="font-size:11px;color:#aaa;font-family:monospace">= 100 - (rep×0.4) - (code×0.3) - (vague×0.3)</div>
+      </td>
+      <td style="text-align:center">${m.sessionDepth}</td>
+      <td style="text-align:center;color:#22c55e">${m.cacheHitRate}%</td>
+      <td><span class="status-badge ${effClass(eff)}">${eff >= 80 ? "TỐT" : eff >= 60 ? "TRUNG BÌNH" : "CẦN CẢI THIỆN"}</span></td>
+    </tr>`;
+  }).join("");
+
+  const memberDetails = data.members.map((m, idx) => {
     const projectSections = m.projects.map((p) => {
-      const weekSections = p.weeks.map((w) => `
-        <div class="week">
-          <div class="week-title">Tuần ${w.week} (${w.count} prompts${w.noiseCount > 0 ? ` + ${w.noiseCount} system` : ""})</div>
-          <ol>${w.prompts.map((q) => `<li>${escapeHtml(q)}</li>`).join("")}</ol>
+      const weekItems = p.weeks.map((w) => `
+        <div style="margin-bottom:12px">
+          <div style="font-size:12px;font-weight:600;color:#fd7e14;margin-bottom:6px">
+            📅 Tuần ${w.week} — ${w.count} prompts${w.noiseCount > 0 ? ` + ${w.noiseCount} system` : ""}
+          </div>
+          <ol style="margin:0;padding-left:20px">
+            ${w.prompts.map((q) => `<li style="font-size:13px;color:#555;padding:2px 0;line-height:1.5;border-bottom:1px solid #f0f0f0">${escapeHtml(q)}</li>`).join("")}
+          </ol>
         </div>`).join("");
-
       return `
-      <div class="project">
-        <div class="project-name">${escapeHtml(p.name)}</div>
-        <div class="project-meta">${p.sessions} sessions · ${p.totalPrompts} prompts (${p.meaningfulPrompts} meaningful)</div>
-        ${weekSections}
-      </div>`;
+        <div style="border-left:3px solid #1e3c72;padding-left:12px;margin-bottom:16px">
+          <div style="font-weight:600;font-size:14px;margin-bottom:4px">📂 ${escapeHtml(p.name)}</div>
+          <div style="font-size:12px;color:#888;margin-bottom:8px">${p.sessions} sessions · ${p.totalPrompts} prompts (${p.meaningfulPrompts} meaningful)</div>
+          ${weekItems}
+        </div>`;
     }).join("");
-
     return `
-    <div class="member" id="m${idx}">
-      <div class="member-header">
-        <span class="rank rank-${idx < 3 ? idx + 1 : "other"}">${idx + 1}</span>
-        <span class="member-name">${escapeHtml(m.email)}</span>
-        <div class="member-stats">
-          <span>${m.totalPrompts} prompts</span>
-          <span>${m.sessions} sessions</span>
-          <span>${fmt(m.totalTokens)} tokens</span>
-          <span>${m.activeDays} ngày hoạt động</span>
-        </div>
+    <button class="collapsible" onclick="toggleCollapsible(this)">
+      <span><span class="rank-badge ${rankBadge(idx)}" style="margin-right:8px">${idx + 1}</span>${escapeHtml(m.email)} — ${m.totalPrompts} prompts · Efficiency ${m.promptEfficiency}%</span>
+      <span>▼</span>
+    </button>
+    <div class="collapsible-content">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+        ${[
+          ["Tokens/Prompt", fmt(m.tokensPerPrompt), "#06b6d4"],
+          ["Session Depth", String(m.sessionDepth), "#a78bfa"],
+          ["Cache Hit", m.cacheHitRate + "%", "#22c55e"],
+          ["Active Days", String(m.activeDays), "#888"],
+        ].map(([l, v, c]) => `<div style="background:#f8f9fa;border:1px solid #eee;border-radius:6px;padding:4px 12px;font-size:12px;color:#666">${l}: <strong style="color:${c}">${v}</strong></div>`).join("")}
       </div>
-      <div class="metrics-row">
-        <div class="metric-chip" title="% prompt thực / tổng prompt">
-          Prompt Efficiency <strong style="color:${m.promptEfficiency >= 80 ? "#4ade80" : m.promptEfficiency >= 50 ? "#fb923c" : "#f87171"}">${m.promptEfficiency}%</strong>
-        </div>
-        <div class="metric-chip">Tokens/Prompt <strong>${fmt(m.tokensPerPrompt)}</strong></div>
-        <div class="metric-chip">Session Depth <strong>${m.sessionDepth}</strong></div>
-        <div class="metric-chip">Cache Hit <strong>${m.cacheHitRate}%</strong></div>
-        <div class="metric-chip">Cost <strong>$${m.estimatedCostUsd.toFixed(4)}</strong></div>
-      </div>
-      <div class="projects">${projectSections}</div>
+      ${projectSections || "<p style='color:#aaa;font-size:13px'>Chưa có dữ liệu project.</p>"}
     </div>`;
   }).join("");
 
-  const html = `<!DOCTYPE html><html lang="vi"><head><meta charset="utf-8">
-<title>Team Report: ${from} → ${to}</title>
+  const html = `<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Phân Tích Hiệu Quả Prompt — ${from} → ${to}</title>
 <style>
-  :root{--bg:#0a0a0a;--bg2:#111827;--bg3:#1f2937;--text:#e2e8f0;--muted:#6b7280;--accent:#818cf8;--green:#4ade80;--orange:#fb923c;--border:#2d3748}
-  body{font-family:-apple-system,sans-serif;background:var(--bg);color:var(--text);margin:0;padding:2rem}
-  .container{max-width:1100px;margin:0 auto}
-  h1{color:var(--accent);font-size:1.8rem;margin-bottom:.25rem}
-  .subtitle{color:var(--muted);font-size:.9rem;margin-bottom:2rem}
-  .overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1rem;margin-bottom:2rem}
-  .ov-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:1.25rem;text-align:center}
-  .ov-val{font-size:2rem;font-weight:700;color:var(--accent)}.ov-label{color:var(--muted);font-size:.8rem;margin-top:.25rem}
-  .member{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin-bottom:1.5rem}
-  .member-header{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:.75rem}
-  .rank{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;font-weight:700;font-size:.85rem;flex-shrink:0}
-  .rank-1{background:#ffd700;color:#000}.rank-2{background:#c0c0c0;color:#000}.rank-3{background:#cd7f32;color:#fff}.rank-other{background:var(--bg3);color:var(--muted)}
-  .member-name{font-size:1.1rem;font-weight:600}
-  .member-stats{display:flex;gap:1rem;flex-wrap:wrap;font-size:.8rem;color:var(--muted);margin-left:auto}
-  .metrics-row{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem}
-  .metric-chip{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:.3rem .75rem;font-size:.78rem;color:var(--muted)}
-  .metric-chip strong{color:var(--text)}
-  .project{border-left:3px solid var(--accent);padding-left:1rem;margin-bottom:1.25rem}
-  .project-name{font-weight:600;font-size:.95rem;margin-bottom:.25rem}
-  .project-meta{color:var(--muted);font-size:.78rem;margin-bottom:.5rem}
-  .week{margin-bottom:.75rem}
-  .week-title{font-size:.8rem;font-weight:600;color:var(--orange);margin-bottom:.4rem}
-  ol{margin:0;padding-left:1.5rem}
-  li{font-size:.78rem;color:#cbd5e1;padding:.15rem 0;line-height:1.5}
-  footer{text-align:center;color:var(--muted);font-size:.75rem;margin-top:2rem;padding-top:1rem;border-top:1px solid var(--border)}
-</style></head><body>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;background:linear-gradient(135deg,#1e3c72 0%,#2a5298 100%);min-height:100vh;padding:20px;color:#333}
+  .container{max-width:1400px;margin:0 auto}
+  .header{background:linear-gradient(135deg,#1e3c72 0%,#2a5298 100%);color:white;padding:35px;border-radius:16px;margin-bottom:22px;box-shadow:0 10px 40px rgba(0,0,0,0.3)}
+  .header h1{font-size:26px;margin-bottom:8px}
+  .header-sub{font-size:14px;opacity:.85}
+  .header-stats{display:flex;gap:24px;margin-top:18px;flex-wrap:wrap}
+  .header-stat{background:rgba(255,255,255,0.15);padding:12px 22px;border-radius:10px;text-align:center}
+  .header-stat span{font-size:13px;opacity:.9;display:block}
+  .header-stat strong{display:block;font-size:22px;margin-top:4px}
+  .cards-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;margin-bottom:22px}
+  .card{background:white;border-radius:12px;padding:22px;box-shadow:0 4px 15px rgba(0,0,0,0.1)}
+  .card-title{font-size:13px;color:#666;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}
+  .card-value{font-size:30px;font-weight:bold;color:#1e3c72}
+  .card-value.good{color:#28a745}.card-value.warning{color:#ffc107}.card-value.danger{color:#dc3545}
+  .card-subtitle{font-size:12px;color:#888;margin-top:5px}
+  .section{background:white;border-radius:12px;padding:25px;margin-bottom:22px;box-shadow:0 4px 15px rgba(0,0,0,0.1)}
+  .section-title{font-size:17px;font-weight:bold;color:#1e3c72;margin-bottom:18px;padding-bottom:10px;border-bottom:2px solid #eee}
+  .formula-box{background:linear-gradient(135deg,#f8f9fa,#e9ecef);border:2px solid #1e3c72;border-radius:10px;padding:20px;margin-bottom:22px}
+  .formula-box h3{color:#1e3c72;margin-bottom:12px;font-size:15px}
+  .formula-box code{display:block;background:#1e3c72;color:#fff;padding:14px;border-radius:7px;font-size:13px;margin-bottom:12px;font-family:'Courier New',monospace}
+  .formula-box ul{margin-left:20px;color:#555}.formula-box li{margin:7px 0;font-size:13px}
+  .metrics-chart{display:flex;flex-direction:column;gap:14px}
+  .metric-bar{display:flex;align-items:center;gap:14px}
+  .metric-label{width:160px;font-size:13px;font-weight:500}
+  .metric-bar-container{flex:1;height:28px;background:#e9ecef;border-radius:14px;overflow:hidden}
+  .metric-bar-fill{height:100%;border-radius:14px;display:flex;align-items:center;justify-content:flex-end;padding-right:10px;color:white;font-weight:bold;font-size:12px}
+  .metric-bar-fill.green{background:linear-gradient(90deg,#28a745,#1e7e34)}
+  .metric-bar-fill.orange{background:linear-gradient(90deg,#fd7e14,#e8590c)}
+  .metric-bar-fill.red{background:linear-gradient(90deg,#dc3545,#c82333)}
+  .metric-value{width:55px;text-align:right;font-weight:bold}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{background:linear-gradient(135deg,#1e3c72 0%,#2a5298 100%);color:white;padding:12px 10px;text-align:left;font-weight:600}
+  th:first-child{border-radius:7px 0 0 0}th:last-child{border-radius:0 7px 0 0}
+  td{padding:12px 10px;border-bottom:1px solid #eee}
+  tr:hover td{background:#f8f9fa}
+  .rank-badge{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;font-weight:bold;font-size:12px}
+  .rank-1{background:linear-gradient(135deg,#ffd700,#ffb700);color:#333}
+  .rank-2{background:linear-gradient(135deg,#c0c0c0,#a0a0a0);color:#333}
+  .rank-3{background:linear-gradient(135deg,#cd7f32,#b87333);color:white}
+  .rank-other{background:#e9ecef;color:#666}
+  .member-name{font-weight:600;color:#1e3c72}
+  .progress-bar{width:80px;height:7px;background:#e9ecef;border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle;margin-right:6px}
+  .progress-fill{height:100%;border-radius:4px}
+  .progress-fill.good{background:#28a745}.progress-fill.warning{background:#ffc107}.progress-fill.danger{background:#dc3545}
+  .status-badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600}
+  .status-badge.good{background:#d4edda;color:#155724}.status-badge.warning{background:#fff3cd;color:#856404}.status-badge.danger{background:#f8d7da;color:#721c24}
+  .collapsible{cursor:pointer;padding:14px;background:#f8f9fa;border:none;width:100%;text-align:left;font-size:14px;font-weight:600;border-radius:8px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+  .collapsible:hover{background:#e9ecef}
+  .collapsible-content{display:none;padding:16px;background:#fff;border:1px solid #eee;border-radius:8px;margin-bottom:14px}
+  .collapsible-content.active{display:block}
+  .footer{text-align:center;padding:20px;color:rgba(255,255,255,.75);font-size:13px}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+  @media print{body{background:white!important;padding:10px!important}.section{break-inside:avoid}.header{break-inside:avoid}.collapsible-content{display:block!important}.print-btn{display:none!important}}
+</style>
+</head>
+<body>
 <div class="container">
-  <h1>◆ Team Report</h1>
-  <div class="subtitle">Giai đoạn: ${from} → ${to} · Generated ${new Date().toLocaleString("vi-VN")}</div>
-  <div class="overview">
-    <div class="ov-card"><div class="ov-val">${data.totalPrompts.toLocaleString()}</div><div class="ov-label">Tổng Prompts</div></div>
-    <div class="ov-card"><div class="ov-val">${data.totalSessions}</div><div class="ov-label">Sessions</div></div>
-    <div class="ov-card"><div class="ov-val">${fmt(data.totalTokens)}</div><div class="ov-label">Tokens</div></div>
-    <div class="ov-card"><div class="ov-val">${data.totalMembers}</div><div class="ov-label">Thành viên</div></div>
-    <div class="ov-card"><div class="ov-val">$${data.estimatedCostUsd.toFixed(2)}</div><div class="ov-label">Chi phí ước tính</div></div>
+  <div class="header">
+    <h1>📊 Dashboard Phân Tích Hiệu Quả Prompt</h1>
+    <div class="header-sub">Kỳ báo cáo: ${from} → ${to} | Xuất lúc ${new Date().toLocaleString("vi-VN")}</div>
+    <div class="header-stats">
+      <div class="header-stat"><span>Thành Viên</span><strong>${data.totalMembers}</strong></div>
+      <div class="header-stat"><span>Tổng Prompts</span><strong>${data.totalPrompts.toLocaleString()}</strong></div>
+      <div class="header-stat"><span>Sessions</span><strong>${data.totalSessions.toLocaleString()}</strong></div>
+      <div class="header-stat"><span>Tổng Tokens</span><strong>${fmt(data.totalTokens)}</strong></div>
+      <div class="header-stat"><span>Điểm TB</span><strong>${avgEfficiency}/100</strong></div>
+    </div>
   </div>
-  ${memberSections}
-  <footer>Claude Reporter · ${new Date().toLocaleString("vi-VN")}</footer>
-</div></body></html>`;
 
-  const blob = new Blob([html], { type: "text/html" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url; a.download = `claude-team-report-${from}-${to}.html`; a.click();
-  URL.revokeObjectURL(url);
+  <div class="cards-grid">
+    <div class="card">
+      <div class="card-title">Tổng Prompts</div>
+      <div class="card-value">${data.totalPrompts.toLocaleString()}</div>
+      <div class="card-subtitle">Trong kỳ báo cáo</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Điểm Hiệu Quả Trung Bình</div>
+      <div class="card-value ${effClass(avgEfficiency)}">${avgEfficiency}</div>
+      <div class="card-subtitle">Trung bình toàn nhóm</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Thành viên</div>
+      <div class="card-value">${data.totalMembers}</div>
+      <div class="card-subtitle">Đang theo dõi</div>
+    </div>
+    ${topPerformer ? `<div class="card">
+      <div class="card-title">Top Performer</div>
+      <div class="card-value good" style="font-size:18px">${escapeHtml(topPerformer.email.split("@")[0])}</div>
+      <div class="card-subtitle">Điểm hiệu quả: ${topPerformer.promptEfficiency}%</div>
+    </div>` : ""}
+  </div>
+
+  <div class="formula-box">
+    <h3>📐 Công Thức Tính Điểm Hiệu Quả</h3>
+    <code>Efficiency Score = Meaningful Prompts / Total Prompts × 100</code>
+    <ul>
+      <li><strong>Meaningful Prompts</strong>: Các prompt có nội dung rõ ràng, không phải system noise</li>
+      <li><strong>Tiêu chí đánh giá</strong>: ≥80: TỐT | 60-79: TRUNG BÌNH | &lt;60: CẦN CẢI THIỆN</li>
+      <li><strong>Session Depth</strong>: Số lượng events trung bình mỗi session</li>
+      <li><strong>Cache Hit Rate</strong>: Tỷ lệ tokens đọc từ cache / tổng tokens</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <div class="section-title">📈 Chỉ Số Hiệu Quả Trung Bình</div>
+    <div class="metrics-chart">
+      <div class="metric-bar">
+        <div class="metric-label">Prompt Efficiency TB</div>
+        <div class="metric-bar-container"><div class="metric-bar-fill ${avgEfficiency >= 80 ? "green" : avgEfficiency >= 60 ? "orange" : "red"}" style="width:${Math.min(avgEfficiency, 100)}%">${avgEfficiency}%</div></div>
+        <div class="metric-value" style="color:${effColor(avgEfficiency)}">${avgEfficiency}%</div>
+      </div>
+      <div class="metric-bar">
+        <div class="metric-label">Avg Cache Hit Rate</div>
+        <div class="metric-bar-container">
+          ${(() => { const v = data.members.length > 0 ? Math.round(data.members.reduce((s,m) => s + m.cacheHitRate, 0) / data.members.length) : 0; return `<div class="metric-bar-fill ${v >= 30 ? "green" : "orange"}" style="width:${Math.min(v,100)}%">${v}%</div>`; })()}
+        </div>
+        <div class="metric-value" style="color:#22c55e">${data.members.length > 0 ? Math.round(data.members.reduce((s,m) => s + m.cacheHitRate, 0) / data.members.length) : 0}%</div>
+      </div>
+      <div class="metric-bar">
+        <div class="metric-label">Avg Session Depth</div>
+        <div class="metric-bar-container">
+          ${(() => { const v = data.members.length > 0 ? Math.round(data.members.reduce((s,m) => s + m.sessionDepth, 0) / data.members.length) : 0; const pct = Math.min((v / 20) * 100, 100); return `<div class="metric-bar-fill ${pct >= 50 ? "green" : "orange"}" style="width:${pct}%">${v}</div>`; })()}
+        </div>
+        <div class="metric-value" style="color:#a78bfa">${data.members.length > 0 ? Math.round(data.members.reduce((s,m) => s + m.sessionDepth, 0) / data.members.length) : 0}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">👥 Bảng Xếp Hạng Thành Viên</div>
+    <div style="overflow-x:auto">
+      <table>
+        <thead><tr>
+          <th style="width:40px">#</th>
+          <th>Thành Viên</th>
+          <th style="text-align:right">Prompts</th>
+          <th>Tokens</th>
+          <th>Hiệu Quả</th>
+          <th style="text-align:center">Depth</th>
+          <th style="text-align:center">Cache Hit</th>
+          <th>Trạng Thái</th>
+        </tr></thead>
+        <tbody>${memberRows}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">🔍 Chi Tiết Theo Thành Viên</div>
+    ${memberDetails}
+  </div>
+
+  <div class="footer">
+    <strong>Dashboard Phân Tích Hiệu Quả Prompt</strong><br>
+    Ngày tạo: ${new Date().toLocaleString("vi-VN")} | Kỳ báo cáo: ${from} → ${to}<br>
+    <span style="font-size:11px;opacity:.7">TỐT ≥80 | TRUNG BÌNH 60-79 | CẦN CẢI THIỆN &lt;60</span>
+  </div>
+</div>
+<script>
+function toggleCollapsible(el){
+  const c=el.nextElementSibling;
+  const a=el.querySelector('span:last-child');
+  if(c.classList.contains('active')){c.classList.remove('active');a.textContent='▼';}
+  else{c.classList.add('active');a.textContent='▲';}
+}
+</script>
+</body></html>`;
+
+  downloadBlob(new Blob([html], { type: "text/html" }), `claude-team-report-${from}-${to}.html`);
 }
 
 // ─── Metric bar ───────────────────────────────────────────────────────────────
@@ -265,7 +521,6 @@ function MemberCard({ member, rank, maxTokens, maxPrompts }: {
           {[
             { label: "Prompts", value: member.totalPrompts, color: "var(--accent)" },
             { label: "Tokens", value: fmt(member.totalTokens), color: "#f59e0b" },
-            { label: "Cost", value: `$${member.estimatedCostUsd.toFixed(4)}`, color: "#f97316" },
           ].map((s) => (
             <div key={s.label} style={{ textAlign: "right" }}>
               <div style={{ color: "var(--text-muted)", fontSize: "0.65rem" }}>{s.label}</div>
@@ -555,6 +810,7 @@ function PromptQualityView({ from, to }: { from: string; to: string }) {
     try {
       const qs = new URLSearchParams({ from, to });
       const res = await fetch(`/api/report/prompt-quality?${qs}`);
+      if (!res.ok) { setStatus("error"); return; }
       const json: PQData = await res.json();
       setData(json); setStatus("done");
     } catch { setStatus("error"); }
@@ -756,15 +1012,25 @@ function PromptQualityView({ from, to }: { from: string; to: string }) {
 function TeamReportView({ from, to }: { from: string; to: string }) {
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [report, setReport] = useState<TeamReportData | null>(null);
+  const [pqData, setPqData] = useState<PQData | null>(null);
   const tick = useAutoRefresh(60_000);
 
   async function generate() {
     setStatus("loading");
     try {
       const qs = new URLSearchParams({ from, to });
-      const res = await fetch(`/api/report/team?${qs}`);
-      const data: TeamReportData = await res.json();
-      setReport(data); setStatus("done");
+      const [teamRes, pqRes] = await Promise.all([
+        fetch(`/api/report/team?${qs}`),
+        fetch(`/api/report/prompt-quality?${qs}`),
+      ]);
+      if (!teamRes.ok) { setStatus("error"); return; }
+      const data: TeamReportData = await teamRes.json();
+      setReport(data);
+      if (pqRes.ok) {
+        const pq: PQData = await pqRes.json();
+        setPqData(pq);
+      }
+      setStatus("done");
     } catch { setStatus("error"); }
   }
 
@@ -813,7 +1079,6 @@ function TeamReportView({ from, to }: { from: string; to: string }) {
               { label: "Sessions", value: report.totalSessions, color: "var(--green)" },
               { label: "Tokens", value: fmt(report.totalTokens), color: "#f59e0b" },
               { label: "Thành viên", value: report.totalMembers, color: "#a78bfa" },
-              { label: "Chi phí ước tính", value: `$${report.estimatedCostUsd.toFixed(2)}`, color: "#f97316" },
             ].map((c) => (
               <div key={c.label} className="card" style={{ padding: "0.75rem 1rem" }}>
                 <div style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>{c.label}</div>
@@ -844,6 +1109,137 @@ function TeamReportView({ from, to }: { from: string; to: string }) {
           {report.members.length === 0 && (
             <div className="card" style={{ textAlign: "center", color: "var(--text-muted)", padding: "2rem" }}>
               Không có dữ liệu trong khoảng thời gian này.
+            </div>
+          )}
+
+          {/* ── Prompt Quality Section ── */}
+          {pqData && (
+            <div style={{ marginTop: "1.75rem" }}>
+              <div style={{ fontWeight: 700, fontSize: "1rem", marginBottom: "1rem", borderBottom: "1px solid var(--border)", paddingBottom: "0.5rem" }}>
+                📊 Chất Lượng Prompt
+              </div>
+
+              {/* PQ overview cards */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: "0.75rem", marginBottom: "1.25rem" }}>
+                <div className="card" style={{ padding: "0.75rem 1rem" }}>
+                  <div style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>Điểm Hiệu Quả TB</div>
+                  <div style={{ color: scoreColor(pqData.avgEfficiencyScore), fontSize: "1.4rem", fontWeight: 700, lineHeight: 1.2 }}>{pqData.avgEfficiencyScore}</div>
+                  <div style={{ fontSize: "0.62rem", color: "var(--text-muted)" }}>Trung bình toàn team</div>
+                </div>
+                <div className="card" style={{ padding: "0.75rem 1rem" }}>
+                  <div style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>Prompts Có Vấn Đề</div>
+                  <div style={{ color: "#fb923c", fontSize: "1.4rem", fontWeight: 700, lineHeight: 1.2 }}>{pqData.problematicPct}%</div>
+                  <div style={{ fontSize: "0.62rem", color: "var(--text-muted)" }}>{pqData.problematicCount} prompts cần cải thiện</div>
+                </div>
+                <div className="card" style={{ padding: "0.75rem 1rem" }}>
+                  <div style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>Top Performer</div>
+                  <div style={{ color: "#4ade80", fontSize: "1.1rem", fontWeight: 700, lineHeight: 1.4 }}>{pqData.topPerformer?.email.split("@")[0] ?? "—"}</div>
+                  <div style={{ fontSize: "0.62rem", color: "var(--text-muted)" }}>Điểm: {pqData.topPerformer?.efficiencyScore ?? 0}</div>
+                </div>
+              </div>
+
+              {/* Issue rates */}
+              <div className="card" style={{ marginBottom: "1.25rem" }}>
+                <div style={{ fontWeight: 700, fontSize: "0.88rem", marginBottom: "0.75rem" }}>📈 Tỉ Lệ Các Vấn Đề Chính</div>
+                <IssueBar label="Tỉ Lệ Lặp Lại" pct={pqData.issueRates.repetition} warn={20} />
+                <IssueBar label="Code Dump Rate" pct={pqData.issueRates.codeDump} warn={15} />
+                <IssueBar label="Tỉ Lệ Mơ Hồ" pct={pqData.issueRates.vague} warn={10} />
+                <IssueBar label="Tổng Có Vấn Đề" pct={pqData.issueRates.total} warn={18} />
+                <div style={{ fontSize: "0.68rem", color: "var(--text-muted)", marginTop: "0.5rem" }}>
+                  ⚠ Ngưỡng cảnh báo: Lặp lại &gt;20% · Code Dump &gt;15% · Mơ hồ &gt;10%
+                </div>
+              </div>
+
+              {/* Weekly trend */}
+              {pqData.weeklyTrend.length > 0 && (() => {
+                const firstScore = pqData.weeklyTrend[0]?.score ?? 0;
+                const lastScore = pqData.weeklyTrend[pqData.weeklyTrend.length - 1]?.score ?? 0;
+                const scoreDiff = Math.round((lastScore - firstScore) * 10) / 10;
+                return (
+                  <div className="card">
+                    <div style={{ fontWeight: 700, fontSize: "0.88rem", marginBottom: "0.75rem" }}>📈 Phân Tích Xu Hướng Theo Tuần</div>
+
+                    {/* Mini chart */}
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 6, marginBottom: "1rem", height: 64 }}>
+                      {pqData.weeklyTrend.map((w) => (
+                        <div key={w.week} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                          <div style={{ fontSize: "0.6rem", color: scoreColor(w.score), fontWeight: 700 }}>{w.score}</div>
+                          <div style={{ width: "100%", background: scoreColor(w.score), borderRadius: "3px 3px 0 0", height: `${Math.max(8, (w.score / 100) * 48)}px`, opacity: 0.85 }} />
+                          <div style={{ fontSize: "0.58rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{w.week}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Trend table */}
+                    <div style={{ overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem" }}>
+                        <thead>
+                          <tr>
+                            {["Tuần", "Prompts", "Repetition%", "CodeDump%", "Vague%", "Score", "Xu Hướng"].map((h) => (
+                              <th key={h} style={{ textAlign: "left", padding: "6px 10px", color: "var(--text-muted)", borderBottom: "1px solid var(--border)", fontWeight: 600, fontSize: "0.7rem", background: "var(--surface)" }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pqData.weeklyTrend.map((w) => (
+                            <tr key={w.week} style={{ borderBottom: "1px solid var(--border)" }}>
+                              <td style={{ padding: "6px 10px", fontWeight: 600 }}>{w.week}</td>
+                              <td style={{ padding: "6px 10px" }}>{w.prompts}</td>
+                              <td style={{ padding: "6px 10px", color: w.repetitionPct > 20 ? "#f87171" : "var(--text)" }}>{w.repetitionPct}%</td>
+                              <td style={{ padding: "6px 10px", color: w.codeDumpPct > 15 ? "#f87171" : "var(--text)" }}>{w.codeDumpPct}%</td>
+                              <td style={{ padding: "6px 10px", color: w.vaguePct > 10 ? "#f87171" : "var(--text)" }}>{w.vaguePct}%</td>
+                              <td style={{ padding: "6px 10px", fontWeight: 700, color: scoreColor(w.score) }}>{w.score}</td>
+                              <td style={{ padding: "6px 10px", color: w.trend.startsWith("↑") ? "#4ade80" : w.trend.startsWith("↓") ? "#f87171" : "var(--text-muted)" }}>{w.trend}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Summary */}
+                    {pqData.weeklyTrend.length > 1 && (
+                      <div style={{ marginTop: "0.75rem", padding: "0.75rem", background: scoreDiff >= 0 ? "rgba(74,222,128,0.06)" : "rgba(248,113,113,0.06)", borderRadius: 8, fontSize: "0.78rem" }}>
+                        <strong>Tuần đầu → Tuần cuối:</strong> Score từ <strong style={{ color: scoreColor(firstScore) }}>{firstScore}</strong> → <strong style={{ color: scoreColor(lastScore) }}>{lastScore}</strong>
+                        <span style={{ color: scoreDiff >= 0 ? "#4ade80" : "#f87171", marginLeft: 8 }}>({scoreDiff >= 0 ? "+" : ""}{scoreDiff} điểm, {scoreDiff >= 0 ? "+" : ""}{Math.round((scoreDiff / (firstScore || 1)) * 100)}%)</span>
+                        <div style={{ marginTop: 4, color: "var(--text-muted)" }}>
+                          {scoreDiff >= 0 ? "📈 Xu hướng tích cực — chất lượng prompt cải thiện qua các tuần" : "📉 Xu hướng giảm — cần chú ý cải thiện chất lượng prompt"}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Top 3 improvers */}
+                    {pqData.members.length >= 2 && (() => {
+                      const sorted = [...pqData.members].filter((m) => m.weeklyScores.length >= 2)
+                        .map((m) => ({
+                          m,
+                          first: m.weeklyScores[0].score,
+                          last: m.weeklyScores[m.weeklyScores.length - 1].score,
+                          diff: m.weeklyScores[m.weeklyScores.length - 1].score - m.weeklyScores[0].score,
+                        }))
+                        .sort((a, b) => b.diff - a.diff)
+                        .slice(0, 3);
+                      if (sorted.length === 0) return null;
+                      return (
+                        <div style={{ marginTop: "1rem" }}>
+                          <div style={{ fontWeight: 700, fontSize: "0.82rem", marginBottom: "0.6rem" }}>🏆 Top thành viên cải thiện nhiều nhất</div>
+                          {sorted.map((s, i) => (
+                            <div key={s.m.userId} style={{ display: "flex", alignItems: "center", gap: "0.75rem", padding: "0.5rem 0.75rem", background: "var(--surface)", borderRadius: 8, marginBottom: 6 }}>
+                              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 24, height: 24, borderRadius: "50%", fontWeight: 700, fontSize: "0.75rem", flexShrink: 0, background: i === 0 ? "#ffd700" : i === 1 ? "#c0c0c0" : "#cd7f32", color: i === 0 ? "#000" : "#fff" }}>{i + 1}</span>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontWeight: 600, fontSize: "0.82rem" }}>{s.m.email}</div>
+                                <div style={{ fontSize: "0.68rem", color: "var(--text-muted)" }}>
+                                  {s.m.weeklyScores[0].week}: {s.first} → {s.m.weeklyScores[s.m.weeklyScores.length - 1].week}: {s.last}
+                                </div>
+                              </div>
+                              <span style={{ fontWeight: 700, color: s.diff >= 0 ? "#4ade80" : "#f87171", fontSize: "0.88rem" }}>{s.diff >= 0 ? "+" : ""}{Math.round(s.diff * 10) / 10} điểm</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -886,6 +1282,7 @@ function ProjectReportView({ from, to }: { from: string; to: string }) {
     try {
       const qs = new URLSearchParams({ from, to });
       const res = await fetch(`/api/report?${qs}`);
+      if (!res.ok) { setStatus("error"); return; }
       const data: ReportData = await res.json();
       setReport(data); setStatus("done");
       setCurrentProject(data.projects[0]?.name ?? "");
@@ -943,7 +1340,6 @@ function ProjectReportView({ from, to }: { from: string; to: string }) {
               { label: "Sessions", value: report.totalSessions, color: "var(--accent)" },
               { label: "Total Events", value: fmt(report.totalEvents), color: "var(--green)" },
               { label: "Total Tokens", value: fmt(report.totalTokens), color: "#f59e0b" },
-              { label: "Est. Cost", value: `$${report.estimatedCostUsd.toFixed(2)}`, color: "#f97316" },
               { label: "Projects", value: report.projects.length, color: "#a78bfa" },
             ].map((c) => (
               <div key={c.label} className="card" style={{ padding: "0.75rem 1rem" }}>
@@ -979,7 +1375,6 @@ function ProjectReportView({ from, to }: { from: string; to: string }) {
                       { label: "Sessions", value: p.sessions, color: "var(--accent)" },
                       { label: "Events", value: fmt(p.events), color: "var(--green)" },
                       { label: "Tokens", value: fmt(p.totalTokens), color: "#f59e0b" },
-                      { label: "Cost", value: `$${p.estimatedCostUsd.toFixed(4)}`, color: "#f97316" },
                     ].map((m) => (
                       <div key={m.label}>
                         <div style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>{m.label}</div>
@@ -1043,7 +1438,6 @@ function ReportPageInner() {
   const [from, setFrom] = useState(daysAgo(30));
   const [to, setTo] = useState(today());
   const [activePreset, setActivePreset] = useState<number | null>(30);
-  const [tab, setTab] = useState<"team" | "project" | "quality">("team");
   const [userRole, setUserRole] = useState<string>("member");
 
   useEffect(() => {
@@ -1051,8 +1445,8 @@ function ReportPageInner() {
     setUserRole(role);
   }, []);
 
-  // Team Report tab only for admin and dept_head
   const canSeeTeamReport = userRole === "admin" || userRole === "dept_head";
+  const [tab, setTab] = useState<"project" | "team" | "quality">("project");
 
   const inputStyle: React.CSSProperties = {
     background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6,
@@ -1106,21 +1500,23 @@ function ReportPageInner() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap" }}>
-        <button style={tabStyle(tab === "team")} onClick={() => setTab("team")}>
-          👤 My Report
-        </button>
         <button style={tabStyle(tab === "project")} onClick={() => setTab("project")}>
-          📁 Project Report
+          📁 Báo cáo cá nhân
         </button>
         {canSeeTeamReport && (
+          <button style={tabStyle(tab === "team")} onClick={() => setTab("team")}>
+            👥 Báo cáo phòng ban
+          </button>
+        )}
+        {canSeeTeamReport && (
           <button style={tabStyle(tab === "quality")} onClick={() => setTab("quality")}>
-            👥 Team Report
+            📊 Chất lượng Prompt
           </button>
         )}
       </div>
 
-      {tab === "team" && <TeamReportView from={from} to={to} />}
       {tab === "project" && <ProjectReportView from={from} to={to} />}
+      {tab === "team" && canSeeTeamReport && <TeamReportView from={from} to={to} />}
       {tab === "quality" && canSeeTeamReport && <PromptQualityView from={from} to={to} />}
     </div>
   );

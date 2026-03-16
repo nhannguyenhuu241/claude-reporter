@@ -94,9 +94,6 @@ function MemberRow({ m, rank, maxTokens, maxPrompts, onExpand }: {
       <td style={{ padding: "8px", textAlign: "center", color: "#22c55e", fontSize: "0.8rem" }}>
         {m.cacheHitRate}%
       </td>
-      <td style={{ padding: "8px", textAlign: "right", color: "#f97316", fontSize: "0.8rem" }}>
-        ${m.estimatedCostUsd.toFixed(4)}
-      </td>
       <td style={{ padding: "8px" }}>
         <button onClick={onExpand} style={{
           background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 4,
@@ -317,7 +314,6 @@ function DeptPageInner() {
               { label: "Sessions", value: report.totalSessions, color: "var(--green)" },
               { label: "Tokens", value: fmt(report.totalTokens), color: "#f59e0b" },
               { label: "Thành viên", value: report.totalMembers, color: "#a78bfa" },
-              { label: "Chi phí ước tính", value: `$${report.estimatedCostUsd.toFixed(2)}`, color: "#f97316" },
             ].map((c) => (
               <div key={c.label} className="card" style={{ padding: "0.75rem 1rem" }}>
                 <div style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>{c.label}</div>
@@ -387,7 +383,6 @@ function DeptPageInner() {
                     <th style={{ padding: "6px 8px", textAlign: "center" }}>Efficiency</th>
                     <th style={{ padding: "6px 8px", textAlign: "center" }}>Depth</th>
                     <th style={{ padding: "6px 8px", textAlign: "center" }}>Cache</th>
-                    <th style={{ padding: "6px 8px", textAlign: "right" }}>Cost</th>
                     <th style={{ padding: "6px 8px" }}></th>
                   </tr>
                 </thead>
