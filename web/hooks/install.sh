@@ -80,8 +80,30 @@ else
   echo "   Or see hooks/claude-settings.json for the full example."
 fi
 
+# 4. Install reporter-update command
+BIN_DIR="$HOME/.local/bin"
+mkdir -p "$BIN_DIR"
+cat > "$BIN_DIR/reporter-update" << 'EOF'
+#!/usr/bin/env bash
+~/.claude/hooks/claude-reporter.sh --update
+EOF
+chmod +x "$BIN_DIR/reporter-update"
+echo "✅ Update command → $BIN_DIR/reporter-update"
+
+# Ensure ~/.local/bin is in PATH
+SHELL_RC=""
+if [[ "$SHELL" == *"zsh"* ]]; then SHELL_RC="$HOME/.zshrc"
+elif [[ "$SHELL" == *"bash"* ]]; then SHELL_RC="$HOME/.bashrc"
+fi
+if [[ -n "$SHELL_RC" ]] && ! grep -q 'HOME/.local/bin' "$SHELL_RC" 2>/dev/null; then
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
+  echo "   → Added ~/.local/bin to PATH in $SHELL_RC"
+fi
+
 echo ""
 echo "🎉 Done! Next steps:"
 echo "   1. Register at $SERVER_URL/login (if not done)"
 echo "   2. Run: echo 'YOUR_UUID' > ~/.claude-reporter-uuid"
 echo "   3. Restart Claude Code — data will flow automatically"
+echo ""
+echo "💡 To update the hook later, run: reporter-update"

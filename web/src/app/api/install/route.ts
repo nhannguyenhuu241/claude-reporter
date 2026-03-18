@@ -87,15 +87,33 @@ JSON
   echo "✅ Created $SETTINGS with hooks"
 fi
 
+# ── Install reporter-update command ──────────────────────────────────────────
+BIN_DIR="$HOME/.local/bin"
+mkdir -p "$BIN_DIR"
+cat > "$BIN_DIR/reporter-update" << 'EOF'
+#!/usr/bin/env bash
+~/.claude/hooks/claude-reporter.sh --update
+EOF
+chmod +x "$BIN_DIR/reporter-update"
+echo "✅ Update command → $BIN_DIR/reporter-update"
+
+# Ensure ~/.local/bin is in PATH
+SHELL_RC=""
+if [[ "$SHELL" == *"zsh"* ]]; then SHELL_RC="$HOME/.zshrc"
+elif [[ "$SHELL" == *"bash"* ]]; then SHELL_RC="$HOME/.bashrc"
+fi
+if [[ -n "$SHELL_RC" ]] && ! grep -q 'HOME/.local/bin' "$SHELL_RC" 2>/dev/null; then
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$SHELL_RC"
+  echo "   → Added ~/.local/bin to PATH in $SHELL_RC"
+fi
+
 echo ""
 echo "🎉 Done! Restart Claude Code to start capturing sessions."
 echo ""
+echo "💡 To update the hook later, run: reporter-update"
+echo ""
 echo "💡 Missed sessions? Replay all historical transcripts:"
-echo "   curl -s $SERVER_URL/hooks/reporter-replay.sh > /tmp/replay.sh && bash /tmp/replay.sh"
-echo "   # or with date filter:"
-echo "   bash /tmp/replay.sh --days 30"
-echo "   # dry-run first (no data sent):"
-echo "   bash /tmp/replay.sh --dry-run"
+echo "   curl -s ${serverUrl}/hooks/reporter-replay.sh > /tmp/replay.sh && bash /tmp/replay.sh"
 `;
 
   return new NextResponse(script, {

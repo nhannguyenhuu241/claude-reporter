@@ -11,12 +11,30 @@
 #     so the server can deduplicate on replay — safe to send multiple times.
 
 SERVER_URL="${CLAUDE_REPORTER_URL:-https://vibe-reporter.onebot-training.meobeo.ai}"
+
+# ── Self-update ────────────────────────────────────────────────────────────────
+if [[ "${1:-}" == "--update" ]]; then
+  SCRIPT_PATH="$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")"
+  echo "Updating Claude Reporter hook from $SERVER_URL ..."
+  if curl -fsSL "$SERVER_URL/hooks/reporter.sh" -o "$SCRIPT_PATH.tmp"; then
+    chmod +x "$SCRIPT_PATH.tmp"
+    mv "$SCRIPT_PATH.tmp" "$SCRIPT_PATH"
+    echo "Updated successfully: $SCRIPT_PATH"
+  else
+    rm -f "$SCRIPT_PATH.tmp"
+    echo "Update failed. Please check your connection to $SERVER_URL"
+    exit 1
+  fi
+  exit 0
+fi
+
 UUID_FILE="$HOME/.claude-reporter-uuid"
 QUEUE_FILE="$HOME/.claude-reporter-queue.jsonl"
+OVERFLOW_FILE="$HOME/.claude-reporter-queue.overflow"  # archive for trimmed events (replayed later)
 FLUSH_TS_FILE="$HOME/.claude-reporter-lastflush"
 STATE_DIR="$HOME/.claude-reporter-state"
-FLUSH_INTERVAL=90   # seconds between flush attempts
-QUEUE_MAX_LINES=5000  # hard cap on queue size to prevent unbounded growth
+FLUSH_INTERVAL=30     # seconds between flush attempts
+QUEUE_MAX_LINES=20000 # hard cap on live queue; overflow archived to OVERFLOW_FILE
 BATCH_SIZE=100        # must match server MAX_BATCH_SIZE
 MAX_BACKOFF=300       # max retry backoff in seconds (5 min)
 
@@ -246,11 +264,21 @@ except Exception:
 # ── Append all events to local queue (always succeeds, even offline) ──────────
 echo "$EXTRA_EVENTS" >> "$QUEUE_FILE" 2>/dev/null || true
 
-# ── Trim queue if it exceeds QUEUE_MAX_LINES (keep newest events) ─────────────
+# ── Trim queue if it exceeds QUEUE_MAX_LINES ─────────────────────────────────
+# Archive overflow events FIRST so they can be replayed later — no silent drops.
 CURRENT_LINES=$(wc -l < "$QUEUE_FILE" 2>/dev/null || echo 0)
 if (( CURRENT_LINES > QUEUE_MAX_LINES )); then
+  OVERFLOW_COUNT=$(( CURRENT_LINES - QUEUE_MAX_LINES ))
+  # Append oldest N lines to overflow archive, then trim live queue
+  head -n "$OVERFLOW_COUNT" "$QUEUE_FILE" >> "$OVERFLOW_FILE" 2>/dev/null || true
   TRIMMED="${QUEUE_FILE}.trim.$$"
   tail -n "$QUEUE_MAX_LINES" "$QUEUE_FILE" > "$TRIMMED" 2>/dev/null && mv "$TRIMMED" "$QUEUE_FILE" 2>/dev/null || true
+  # Cap overflow archive at 100 000 lines (safety net for extreme cases)
+  OVERFLOW_LINES=$(wc -l < "$OVERFLOW_FILE" 2>/dev/null || echo 0)
+  if (( OVERFLOW_LINES > 100000 )); then
+    OVERFLOW_TRIM="${OVERFLOW_FILE}.trim.$$"
+    tail -n 100000 "$OVERFLOW_FILE" > "$OVERFLOW_TRIM" 2>/dev/null && mv "$OVERFLOW_TRIM" "$OVERFLOW_FILE" 2>/dev/null || true
+  fi
 fi
 
 # ── Check flush interval ──────────────────────────────────────────────────────
@@ -318,8 +346,14 @@ for i in range(0, len(events), batch_size):
 
       if [[ "$HTTP_STATUS" =~ ^2 ]]; then
         SENT_CHUNKS=$(( SENT_CHUNKS + 1 ))
+      elif [[ "$HTTP_STATUS" == "429" ]]; then
+        # Rate-limited: restore queue and use exponential backoff — do NOT sleep here
+        # because the hook runs synchronously inside Claude Code and blocking for 65s
+        # would stall the user's session. The queue will be retried on the next flush.
+        BATCH_FAILED=1
+        break
       else
-        # First failure — stop sending remaining chunks, restore all unsent to queue
+        # Server error / network failure — stop, restore, exponential backoff
         BATCH_FAILED=1
         break
       fi
@@ -345,6 +379,25 @@ for i in range(0, len(events), batch_size):
     # Success (all chunks sent or nothing to send) — reset backoff
     rm -f "$TEMP_QUEUE" 2>/dev/null || true
     rm -f "${FLUSH_TS_FILE}.backoff" 2>/dev/null || true
+
+    # If overflow archive exists, fold events back into live queue for next flush.
+    # Use full QUEUE_MAX_LINES capacity (minus current live lines) to drain faster.
+    if [[ -f "$OVERFLOW_FILE" ]] && [[ -s "$OVERFLOW_FILE" ]]; then
+      LIVE_LINES=$(wc -l < "$QUEUE_FILE" 2>/dev/null || echo 0)
+      ROOM=$(( QUEUE_MAX_LINES - LIVE_LINES ))
+      if (( ROOM > 0 )); then
+        # Prepend oldest overflow events to queue so they're sent next flush
+        FOLDED="${QUEUE_FILE}.fold.$$"
+        head -n "$ROOM" "$OVERFLOW_FILE" > "$FOLDED" 2>/dev/null || true
+        [[ -f "$QUEUE_FILE" ]] && cat "$QUEUE_FILE" >> "$FOLDED" 2>/dev/null || true
+        mv "$FOLDED" "$QUEUE_FILE" 2>/dev/null || true
+        # Remove folded lines from overflow
+        REMAINING_OVF="${OVERFLOW_FILE}.tmp.$$"
+        tail -n +$(( ROOM + 1 )) "$OVERFLOW_FILE" > "$REMAINING_OVF" 2>/dev/null || true
+        mv "$REMAINING_OVF" "$OVERFLOW_FILE" 2>/dev/null || true
+        [[ ! -s "$OVERFLOW_FILE" ]] && rm -f "$OVERFLOW_FILE" 2>/dev/null || true
+      fi
+    fi
   fi
 fi
 

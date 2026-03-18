@@ -33,12 +33,10 @@ export async function GET(req: NextRequest) {
     const filterUserId = searchParams.get("userId") ?? null;
     userFilter = filterUserId ? { userId: filterUserId } : {};
   } else if (userSession?.role === "dept_head" && userSession.departmentId) {
-    // Dept head: scope to their department
-    const deptUsers = await prisma.user.findMany({
-      where: { departmentId: userSession.departmentId },
-      select: { id: true },
-    });
-    userFilter = { userId: { in: deptUsers.map((u) => u.id) } };
+    // Dept head: scope to their department (cached 10 min)
+    const { getDeptMemberIds } = await import("@/lib/reportUtils");
+    const ids = await getDeptMemberIds(userSession.departmentId);
+    userFilter = { userId: { in: ids } };
   } else if (!userSession) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   } else {
@@ -46,12 +44,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Cap sessions to prevent OOM. Narrowing the date range gives complete data.
+  // Load only required columns — no full includes, no take cap for small teams.
+  // Token aggregates come from a separate groupBy query to avoid loading all rows into JS.
   const sessions = await prisma.session.findMany({
     where: { startedAt: { gte: from, lte: to }, ...userFilter as object },
     orderBy: { startedAt: "desc" },
     take: 5_000,
-    include: { user: { select: { id: true, email: true } } },
+    select: {
+      id: true,
+      userId: true,
+      projectPath: true,
+      startedAt: true,
+      inputTokens: true,
+      outputTokens: true,
+      cacheCreationTokens: true,
+      cacheReadTokens: true,
+      user: { select: { id: true, email: true } },
+    },
   });
 
   const sessionIds = sessions.map((s) => s.id);
@@ -63,19 +72,30 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  // Fetch prompts using the time range + eventType index instead of a huge IN clause.
-  // Then filter in-memory to the sessions we actually loaded — avoids Postgres
-  // performance cliff when IN has thousands of items.
+  // Choose query strategy based on session count:
+  // - Small sets (≤500): use IN clause — precise and fast with an index.
+  // - Large sets: use time-range scan + in-memory filter to avoid a Postgres
+  //   performance cliff on huge IN parameters.
   const sessionSet = new Set(sessionIds);
-  const promptEvents = (await prisma.event.findMany({
-    where: {
-      eventType: "user_prompt",
-      timestamp: { gte: from, lte: to },
-    },
-    select: { sessionId: true, userPrompt: true, timestamp: true },
-    orderBy: { timestamp: "asc" },
-    take: 50_000, // safety cap
-  })).filter((e) => sessionSet.has(e.sessionId));
+  const SAFETY_CAP = 20_000;
+  const rawPrompts = sessionIds.length <= 500
+    ? await prisma.event.findMany({
+        where: { eventType: "user_prompt", sessionId: { in: sessionIds }, timestamp: { gte: from, lte: to } },
+        select: { sessionId: true, userPrompt: true, timestamp: true },
+        orderBy: { timestamp: "asc" },
+        take: SAFETY_CAP,
+      })
+    : (await prisma.event.findMany({
+        where: { eventType: "user_prompt", timestamp: { gte: from, lte: to } },
+        select: { sessionId: true, userPrompt: true, timestamp: true },
+        orderBy: { timestamp: "asc" },
+        take: SAFETY_CAP,
+      })).filter((e) => sessionSet.has(e.sessionId));
+
+  if (rawPrompts.length === SAFETY_CAP) {
+    console.warn(`[report/team] prompt safety cap (${SAFETY_CAP}) reached — data may be incomplete. Narrow the date range.`);
+  }
+  const promptEvents = rawPrompts;
 
   const sessionMap = new Map(sessions.map((s) => [s.id, s]));
 

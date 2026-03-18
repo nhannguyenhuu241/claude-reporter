@@ -58,6 +58,7 @@ model Session {
   @@index([userId])
   @@index([userId, startedAt]) // composite for filtered + ordered report queries
   @@index([startedAt]) // date-range queries without userId filter
+  @@index([machineId]) // retroactive claim: updateMany by machineId in processEvent
   @@map("sessions")
 }
 

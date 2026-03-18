@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Error Design System — Claude Reporter</title>
+<style>
+:root {
+  --bg: #0f0f11;
+  --surface: #18181b;
+  --border: #27272a;
+  --text: #e4e4e7;
+  --text-muted: #71717a;
+  --accent: #6366f1;
+  --green: #22c55e;
+  --yellow: #eab308;
+  --red: #ef4444;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, "Cascadia Code", "Fira Code", monospace;
+  font-size: 14px;
+}
+
+/* ── Animations ────────────────── */
+@keyframes glitch-1 {
+  0%   { clip-path: inset(20% 0 60% 0); transform: translate(-4px, 0); }
+  20%  { clip-path: inset(80% 0 1% 0);  transform: translate(4px, 0); }
+  40%  { clip-path: inset(40% 0 43% 0); transform: translate(-2px, 0); }
+  60%  { clip-path: inset(65% 0 10% 0); transform: translate(3px, 0); }
+  80%  { clip-path: inset(5% 0 75% 0);  transform: translate(-3px, 0); }
+  100% { clip-path: inset(20% 0 60% 0); transform: translate(0, 0); }
+}
+@keyframes glitch-2 {
+  0%   { clip-path: inset(50% 0 30% 0); transform: translate(4px, 0); }
+  25%  { clip-path: inset(10% 0 75% 0); transform: translate(-4px, 0); }
+  50%  { clip-path: inset(70% 0 5% 0);  transform: translate(2px, 0); }
+  75%  { clip-path: inset(30% 0 50% 0); transform: translate(-2px, 0); }
+  100% { clip-path: inset(50% 0 30% 0); transform: translate(0, 0); }
+}
+@keyframes scanline { 0%{transform:translateY(-100%)} 100%{transform:translateY(100vh)} }
+@keyframes pulse-ring {
+  0%   { transform: translate(-50%,-50%) scale(0.8); opacity: 0.8; }
+  70%  { transform: translate(-50%,-50%) scale(1.4); opacity: 0; }
+  100% { transform: translate(-50%,-50%) scale(0.8); opacity: 0; }
+}
+@keyframes float-y { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+@keyframes flicker {
+  0%,100%{opacity:1} 92%{opacity:1} 93%{opacity:0.4} 94%{opacity:1} 96%{opacity:0.6} 97%{opacity:1}
+}
+@keyframes terminal-cursor { 0%,100%{opacity:1} 50%{opacity:0} }
+@keyframes fade-up { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:translateY(0)} }
+@keyframes grid-move { 0%{background-position:0 0} 100%{background-position:40px 40px} }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(80px) scale(0.92); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+@keyframes toast-progress { from{width:100%} to{width:0%} }
+@keyframes banner-in { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+
+/* ── Section title ─────────────── */
+.section-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.75rem;
+  margin-bottom: 2rem;
+}
+
+/* ── Error page wrapper ────────── */
+.error-page {
+  position: relative;
+  min-height: 580px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 3rem 2rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+/* ── Terminal window ───────────── */
+.terminal-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 8px 8px 0 0;
+  padding: 0.4rem 1rem;
+  font-size: 0.68rem;
+  color: #71717a;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.terminal-body {
+  background: #0d0d0f;
+  border: 1px solid #27272a;
+  border-top: none;
+  border-radius: 0 0 12px 12px;
+  padding: 1.5rem 2rem 2rem;
+  text-align: left;
+  min-width: 380px;
+  max-width: 520px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+}
+
+/* ── Buttons ───────────────────── */
+.btn-primary {
+  display: inline-block;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.75rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: none;
+  color: #fff;
+}
+.btn-secondary {
+  display: inline-block;
+  background: none;
+  border: 1px solid #27272a;
+  border-radius: 8px;
+  padding: 0.6rem 1.75rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: none;
+  color: #71717a;
+}
+
+/* ── Toast ─────────────────────── */
+.toast {
+  position: relative;
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  min-width: 300px;
+  max-width: 360px;
+  overflow: hidden;
+  animation: toast-in 0.3s cubic-bezier(0.34,1.56,0.64,1) both;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+.toast-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.toast-progress {
+  position: absolute;
+  bottom: 0; left: 0;
+  height: 2px;
+  animation: toast-progress 4.5s linear forwards;
+  opacity: 0.6;
+}
+
+/* ── Banner ────────────────────── */
+.banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  animation: banner-in 0.25s ease both;
+  margin-bottom: 0.75rem;
+}
+.banner-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+<div style="max-width:1200px;margin:0 auto;padding:3rem 2rem">
+  <div style="margin-bottom:3rem">
+    <div style="font-size:0.7rem;color:#6366f1;letter-spacing:0.1em;margin-bottom:0.5rem">CLAUDE REPORTER</div>
+    <h1 style="font-size:1.5rem;font-weight:700;margin-bottom:0.4rem">Error Design System</h1>
+    <p style="color:#71717a;font-size:0.82rem">Error screens · Toast notifications · Inline banners</p>
+  </div>
+
+  <!-- ════════ 404 PAGE ════════ -->
+  <div style="margin-bottom:4rem">
+    <div class="section-label">01 · 404 — Signal Lost</div>
+    <div class="error-page" style="background:#0f0f11">
+
+      <!-- dot grid -->
+      <div style="position:absolute;inset:0;background-image:radial-gradient(circle, #6366f120 1px, transparent 1px);background-size:40px 40px;animation:grid-move 8s linear infinite;pointer-events:none"></div>
+      <!-- glow -->
+      <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:600px;height:600px;border-radius:50%;background:radial-gradient(circle, #6366f112 0%, transparent 70%);pointer-events:none"></div>
+      <!-- scanline -->
+      <div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#6366f130,transparent);animation:scanline 6s linear infinite;pointer-events:none"></div>
+
+      <div style="position:relative;z-index:1;animation:fade-up 0.6s ease both">
+        <!-- terminal -->
+        <div class="terminal-header">
+          <span class="dot" style="background:#ef4444"></span>
+          <span class="dot" style="background:#eab308"></span>
+          <span class="dot" style="background:#22c55e"></span>
+          <span style="margin-left:0.5rem">bash — signal_finder.sh</span>
+        </div>
+        <div class="terminal-body">
+          <div style="font-size:0.75rem;color:#71717a;margin-bottom:1rem;line-height:1.8">
+            <span style="color:#22c55e">●</span>
+            <span style="color:#6366f1"> ~/claude-reporter</span>
+            <span style="color:#71717a"> $ </span>
+            <span style="color:#e4e4e7">curl -X GET /api/this-page</span>
+          </div>
+          <div style="font-size:0.72rem;color:#71717a;line-height:2;margin-bottom:0.5rem">
+            <div><span style="color:#6366f150">›</span> <span style="color:#eab308">WARN</span> resolving route...</div>
+            <div><span style="color:#6366f150">›</span> <span style="color:#eab308">WARN</span> checking filesystem...</div>
+            <div><span style="color:#6366f150">›</span> <span style="color:#ef4444">ERROR</span> route not found in registry</div>
+            <div><span style="color:#6366f150">›</span> <span style="color:#ef4444">ERROR</span> fallback lookup: <span style="color:#71717a">null</span></div>
+          </div>
+          <div style="height:1px;background:#27272a;margin:1rem 0"></div>
+
+          <!-- 404 glitch -->
+          <div style="position:relative;text-align:center;margin:0.5rem 0 1rem">
+            <div style="font-size:6.5rem;font-weight:900;line-height:1;background:linear-gradient(135deg,#6366f1,#a78bfa,#818cf8);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-4px;animation:flicker 4s ease-in-out infinite">404</div>
+            <div style="position:absolute;top:0;left:0;right:0;font-size:6.5rem;font-weight:900;line-height:1;color:#06b6d4;letter-spacing:-4px;opacity:0.35;animation:glitch-1 3s steps(1) infinite;pointer-events:none">404</div>
+            <div style="position:absolute;top:0;left:0;right:0;font-size:6.5rem;font-weight:900;line-height:1;color:#f97316;letter-spacing:-4px;opacity:0.25;animation:glitch-2 3s steps(1) infinite 0.5s;pointer-events:none">404</div>
+          </div>
+          <div style="text-align:center;font-size:0.68rem;color:#71717a;margin-bottom:0.5rem">
+            <span style="color:#6366f170">// </span><span style="color:#a78bfa">SIGNAL_LOST</span> · tín hiệu bị mất
+          </div>
+          <div style="text-align:center;font-size:0.72rem;color:#71717a">
+            $ route_not_found<span style="animation:terminal-cursor 1s step-end infinite;color:#6366f1">█</span>
+          </div>
+        </div>
+
+        <div style="font-size:1.1rem;font-weight:700;color:#e4e4e7;margin:1.5rem 0 0.4rem">Trang không tồn tại</div>
+        <div style="color:#71717a;font-size:0.82rem;max-width:360px;margin:0 auto 1.75rem;line-height:1.6">
+          Địa chỉ bạn truy cập không tồn tại hoặc đã bị xóa khỏi hệ thống.
+        </div>
+        <div style="display:flex;gap:0.75rem;justify-content:center">
+          <a class="btn-primary" href="#" style="background:linear-gradient(135deg,#6366f1,#7c3aed);box-shadow:0 0 20px #6366f130">← Về trang chủ</a>
+          <a class="btn-secondary" href="#">Sessions</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ 500 PAGE ════════ -->
+  <div style="margin-bottom:4rem">
+    <div class="section-label">02 · 500 — Server Crash</div>
+    <div class="error-page" style="background:#0f0f11">
+
+      <div style="position:absolute;inset:0;background-image:radial-gradient(circle, #ef444418 1px, transparent 1px);background-size:40px 40px;animation:grid-move 6s linear infinite;pointer-events:none"></div>
+      <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:700px;height:700px;border-radius:50%;background:radial-gradient(circle, #ef444415 0%, transparent 65%);pointer-events:none"></div>
+      <!-- pulse rings -->
+      <div style="position:absolute;top:50%;left:50%;width:400px;height:400px;border-radius:50%;border:1px solid #ef444422;animation:pulse-ring 2.5s ease-out infinite;pointer-events:none"></div>
+      <div style="position:absolute;top:50%;left:50%;width:400px;height:400px;border-radius:50%;border:1px solid #ef444415;animation:pulse-ring 2.5s ease-out infinite 0.8s;pointer-events:none"></div>
+
+      <div style="position:relative;z-index:1;animation:fade-up 0.5s ease both">
+        <div style="font-size:2.5rem;margin-bottom:1rem;animation:float-y 3s ease-in-out infinite">⚠️</div>
+
+        <div style="position:relative;margin-bottom:0.25rem">
+          <div style="font-size:6.5rem;font-weight:900;line-height:1;background:linear-gradient(135deg,#ef4444,#f97316,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-4px;animation:flicker 5s ease-in-out infinite">500</div>
+          <div style="position:absolute;top:0;left:0;right:0;font-size:6.5rem;font-weight:900;line-height:1;color:#06b6d4;letter-spacing:-4px;opacity:0.22;animation:glitch-1 2.5s steps(1) infinite;pointer-events:none">500</div>
+          <div style="position:absolute;top:0;left:0;right:0;font-size:6.5rem;font-weight:900;line-height:1;color:#6366f1;letter-spacing:-4px;opacity:0.18;animation:glitch-2 2.5s steps(1) infinite 0.3s;pointer-events:none">500</div>
+        </div>
+
+        <div style="font-size:0.68rem;color:#71717a;margin-bottom:0.25rem">
+          <span style="color:#ef444460">// </span><span style="color:#f97316">INTERNAL_SERVER_ERROR</span> · máy chủ gặp sự cố
+        </div>
+
+        <!-- Error card -->
+        <div style="background:#0d0d0f;border:1px solid #3f1515;border-left:3px solid #ef4444;border-radius:10px;padding:1.25rem 1.5rem;text-align:left;max-width:500px;margin:1.5rem auto;box-shadow:0 0 30px #ef444412">
+          <div style="font-size:0.75rem;color:#f87171;font-weight:600;margin-bottom:0.5rem">✕ Unhandled Runtime Error</div>
+          <div style="font-size:0.72rem;color:#e4e4e7;margin-bottom:0.75rem;line-height:1.5">Đã xảy ra lỗi không mong muốn. Hệ thống đã ghi nhận sự cố này.</div>
+          <div style="display:flex;align-items:center;gap:0.5rem;background:#1a0a0a;border:1px solid #27272a;border-radius:6px;padding:0.4rem 0.75rem;margin-bottom:0.75rem">
+            <span style="font-size:0.65rem;color:#71717a">Error ID:</span>
+            <code style="font-size:0.65rem;color:#f97316;letter-spacing:0.05em">NEXT-abc123def456</code>
+          </div>
+          <div style="font-size:0.68rem;color:#71717a;cursor:pointer">▶ Xem stack trace</div>
+        </div>
+
+        <div style="font-size:1.1rem;font-weight:700;color:#e4e4e7;margin-bottom:0.4rem">Lỗi máy chủ</div>
+        <div style="color:#71717a;font-size:0.82rem;max-width:380px;margin:0 auto 1.75rem;line-height:1.6">
+          Vui lòng thử lại. Nếu vấn đề tiếp tục, hãy liên hệ quản trị viên.
+        </div>
+        <div style="display:flex;gap:0.75rem;justify-content:center">
+          <button class="btn-primary" style="background:linear-gradient(135deg,#ef4444,#f97316);box-shadow:0 0 20px #ef444430">↺ Thử lại</button>
+          <a class="btn-secondary" href="#">Về trang chủ</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ 401 PAGE ════════ -->
+  <div style="margin-bottom:4rem">
+    <div class="section-label">03 · 401 — Access Denied</div>
+    <div class="error-page" style="background:#0f0f11">
+
+      <div style="position:absolute;inset:0;background-image:radial-gradient(circle, #eab30818 1px, transparent 1px);background-size:40px 40px;animation:grid-move 10s linear infinite;pointer-events:none"></div>
+      <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:650px;height:650px;border-radius:50%;background:radial-gradient(circle, #eab30812 0%, transparent 65%);pointer-events:none"></div>
+      <div style="position:absolute;top:50%;left:50%;width:360px;height:360px;border-radius:50%;border:1px solid #eab30825;animation:pulse-ring 3s ease-out infinite;pointer-events:none"></div>
+
+      <div style="position:relative;z-index:1;animation:fade-up 0.5s ease both">
+        <div style="width:70px;height:70px;border-radius:20px;background:linear-gradient(135deg,#1c1507,#2d1f05);border:1px solid #eab30840;display:flex;align-items:center;justify-content:center;font-size:2rem;margin:0 auto 1.5rem;box-shadow:0 0 24px #eab30820;animation:float-y 4s ease-in-out infinite">🔒</div>
+
+        <div style="position:relative;margin-bottom:0.25rem">
+          <div style="font-size:6.5rem;font-weight:900;line-height:1;background:linear-gradient(135deg,#eab308,#f97316,#fbbf24);-webkit-background-clip:text;-webkit-text-fill-color:transparent;letter-spacing:-4px;animation:flicker 6s ease-in-out infinite">401</div>
+          <div style="position:absolute;top:0;left:0;right:0;font-size:6.5rem;font-weight:900;line-height:1;color:#ef4444;letter-spacing:-4px;opacity:0.18;animation:glitch-1 4s steps(1) infinite;pointer-events:none">401</div>
+        </div>
+        <div style="font-size:0.68rem;color:#71717a;margin-bottom:0.25rem">
+          <span style="color:#eab30860">// </span><span style="color:#fbbf24">UNAUTHORIZED</span> · truy cập bị từ chối
+        </div>
+
+        <!-- Auth card -->
+        <div style="background:#0d0d0f;border:1px solid #2a1f05;border-left:3px solid #eab308;border-radius:10px;padding:1.25rem 1.5rem;text-align:left;max-width:460px;margin:1.25rem auto;box-shadow:0 0 30px #eab30810">
+          <div style="font-size:0.72rem;color:#71717a;line-height:2">
+            <div><span style="color:#eab308">AUTH</span> checking credentials...</div>
+            <div><span style="color:#ef4444">FAIL</span> no valid session token found</div>
+            <div><span style="color:#ef4444">FAIL</span> access policy: <span style="color:#fbbf24">DENY</span></div>
+          </div>
+          <div style="height:1px;background:#27272a;margin:0.75rem 0"></div>
+          <div style="display:flex;align-items:center;gap:0.5rem;font-size:0.7rem;color:#71717a">
+            <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;box-shadow:0 0 6px #ef4444;display:inline-block"></span>
+            Phiên đăng nhập không hợp lệ hoặc đã hết hạn.
+          </div>
+        </div>
+
+        <div style="font-size:1.1rem;font-weight:700;color:#e4e4e7;margin-bottom:0.4rem">Không có quyền truy cập</div>
+        <div style="color:#71717a;font-size:0.82rem;max-width:380px;margin:0 auto 1.75rem;line-height:1.6">
+          Bạn cần đăng nhập để xem trang này. Phiên làm việc có thể đã hết hạn.
+        </div>
+        <div style="display:flex;gap:0.75rem;justify-content:center">
+          <a class="btn-primary" href="#" style="background:linear-gradient(135deg,#eab308,#f97316);color:#0a0a0a;font-weight:700;box-shadow:0 0 20px #eab30830">→ Đăng nhập</a>
+          <a class="btn-secondary" href="#">Về trang chủ</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ TOAST ════════ -->
+  <div style="margin-bottom:4rem">
+    <div class="section-label">04 · Toast Notification System</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem">
+
+      <!-- Success -->
+      <div class="toast" style="background:#0a1a0e;border:1px solid #22c55e30;border-left:3px solid #22c55e;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+        <div class="toast-icon" style="background:#22c55e20;border:1px solid #22c55e40;color:#4ade80">✓</div>
+        <div style="flex:1">
+          <div style="font-size:0.8rem;font-weight:600;color:#4ade80;margin-bottom:0.2rem">Lưu thành công</div>
+          <div style="font-size:0.72rem;color:#71717a">Cài đặt đã được lưu vào hệ thống.</div>
+        </div>
+        <span style="color:#71717a;font-size:1rem;cursor:pointer">×</span>
+        <div class="toast-progress" style="background:#22c55e"></div>
+      </div>
+
+      <!-- Error -->
+      <div class="toast" style="background:#1a0808;border:1px solid #ef444430;border-left:3px solid #ef4444;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+        <div class="toast-icon" style="background:#ef444420;border:1px solid #ef444440;color:#f87171">✕</div>
+        <div style="flex:1">
+          <div style="font-size:0.8rem;font-weight:600;color:#f87171;margin-bottom:0.2rem">Kết nối thất bại</div>
+          <div style="font-size:0.72rem;color:#71717a">Không thể gửi sự kiện. Đang thử lại...</div>
+        </div>
+        <span style="color:#71717a;font-size:1rem;cursor:pointer">×</span>
+        <div class="toast-progress" style="background:#ef4444"></div>
+      </div>
+
+      <!-- Warning -->
+      <div class="toast" style="background:#1a1505;border:1px solid #eab30830;border-left:3px solid #eab308;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+        <div class="toast-icon" style="background:#eab30820;border:1px solid #eab30840;color:#fbbf24">⚠</div>
+        <div style="flex:1">
+          <div style="font-size:0.8rem;font-weight:600;color:#fbbf24;margin-bottom:0.2rem">Giới hạn rate</div>
+          <div style="font-size:0.72rem;color:#71717a">Quá nhiều yêu cầu. Thử lại sau 60s.</div>
+        </div>
+        <span style="color:#71717a;font-size:1rem;cursor:pointer">×</span>
+        <div class="toast-progress" style="background:#eab308"></div>
+      </div>
+
+      <!-- Info -->
+      <div class="toast" style="background:#0e0e1a;border:1px solid #6366f130;border-left:3px solid #6366f1;box-shadow:0 8px 32px rgba(0,0,0,0.4)">
+        <div class="toast-icon" style="background:#6366f120;border:1px solid #6366f140;color:#818cf8">ℹ</div>
+        <div style="flex:1">
+          <div style="font-size:0.8rem;font-weight:600;color:#818cf8;margin-bottom:0.2rem">Phiên mới</div>
+          <div style="font-size:0.72rem;color:#71717a">Session abc123 vừa được khởi tạo.</div>
+        </div>
+        <span style="color:#71717a;font-size:1rem;cursor:pointer">×</span>
+        <div class="toast-progress" style="background:#6366f1"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ BANNERS ════════ -->
+  <div style="margin-bottom:4rem">
+    <div class="section-label">05 · Inline Error Banners</div>
+
+    <div class="banner" style="background:#1a0808;border:1px solid #ef444425;border-left:3px solid #ef4444">
+      <div class="banner-icon" style="background:#ef444420;border:1px solid #ef444435;color:#f87171">✕</div>
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem">
+          <span style="font-size:0.8rem;font-weight:600;color:#f87171">Không thể tải dữ liệu</span>
+          <span style="font-size:0.58rem;font-weight:700;color:#ef4444;background:#ef444415;border:1px solid #ef444430;border-radius:4px;padding:1px 5px;letter-spacing:0.05em">LỖI</span>
+        </div>
+        <div style="font-size:0.72rem;color:#71717a;line-height:1.5;margin-bottom:0.5rem">
+          Không thể kết nối đến máy chủ. Kiểm tra kết nối mạng và thử lại.
+        </div>
+        <button style="background:#ef444420;border:1px solid #ef444440;border-radius:5px;padding:0.25rem 0.75rem;font-size:0.7rem;font-weight:600;color:#f87171;cursor:pointer;font-family:inherit">↺ Thử lại</button>
+      </div>
+      <span style="color:#71717a;font-size:1rem;cursor:pointer">×</span>
+    </div>
+
+    <div class="banner" style="background:#1a1505;border:1px solid #eab30825;border-left:3px solid #eab308">
+      <div class="banner-icon" style="background:#eab30820;border:1px solid #eab30835;color:#fbbf24">⚠</div>
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem">
+          <span style="font-size:0.8rem;font-weight:600;color:#fbbf24">Dữ liệu có thể không đầy đủ</span>
+          <span style="font-size:0.58rem;font-weight:700;color:#eab308;background:#eab30815;border:1px solid #eab30830;border-radius:4px;padding:1px 5px;letter-spacing:0.05em">CẢNH BÁO</span>
+        </div>
+        <div style="font-size:0.72rem;color:#71717a;line-height:1.5">
+          Đã đạt giới hạn 20,000 sự kiện. Dữ liệu có thể bị cắt bớt cho khoảng thời gian này.
+        </div>
+      </div>
+      <span style="color:#71717a;font-size:1rem;cursor:pointer">×</span>
+    </div>
+
+    <div class="banner" style="background:#0e0e1a;border:1px solid #6366f125;border-left:3px solid #6366f1">
+      <div class="banner-icon" style="background:#6366f120;border:1px solid #6366f135;color:#818cf8">ℹ</div>
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem">
+          <span style="font-size:0.8rem;font-weight:600;color:#818cf8">Hook chưa được cài đặt</span>
+          <span style="font-size:0.58rem;font-weight:700;color:#6366f1;background:#6366f115;border:1px solid #6366f130;border-radius:4px;padding:1px 5px;letter-spacing:0.05em">THÔNG TIN</span>
+        </div>
+        <div style="font-size:0.72rem;color:#71717a;line-height:1.5">
+          Truy cập trang Hồ sơ để lấy lệnh cài đặt hook cho máy của bạn.
+        </div>
+      </div>
+      <span style="color:#71717a;font-size:1rem;cursor:pointer">×</span>
+    </div>
+  </div>
+
+  <div style="text-align:center;font-size:0.68rem;color:#71717a;padding-top:2rem;border-top:1px solid #27272a">
+    Claude Reporter · Error Design System · 2026-03-17
+  </div>
+</div>
+
+</body>
+</html>

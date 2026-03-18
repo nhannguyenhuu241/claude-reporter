@@ -9,6 +9,23 @@
 $ErrorActionPreference = "SilentlyContinue"
 
 $SERVER_URL    = if ($env:CLAUDE_REPORTER_URL) { $env:CLAUDE_REPORTER_URL } else { "https://vibe-reporter.onebot-training.meobeo.ai" }
+
+# ── Self-update ────────────────────────────────────────────────────────────────
+if ($args -contains "--update") {
+    $ScriptPath = $MyInvocation.MyCommand.Path
+    Write-Host "Updating Claude Reporter hook from $SERVER_URL ..."
+    try {
+        $tmpPath = "$ScriptPath.tmp"
+        Invoke-WebRequest -Uri "$SERVER_URL/hooks/reporter.ps1" -OutFile $tmpPath -UseBasicParsing -ErrorAction Stop
+        Move-Item -Path $tmpPath -Destination $ScriptPath -Force
+        Write-Host "Updated successfully: $ScriptPath"
+    } catch {
+        if (Test-Path "$ScriptPath.tmp") { Remove-Item "$ScriptPath.tmp" -Force -ErrorAction SilentlyContinue }
+        Write-Host "Update failed: $_"
+        exit 1
+    }
+    exit 0
+}
 $UUID_FILE     = "$HOME\.claude-reporter-uuid"
 $QUEUE_FILE    = "$HOME\.claude-reporter-queue.jsonl"
 $FLUSH_TS_FILE = "$HOME\.claude-reporter-lastflush"
@@ -115,10 +132,10 @@ try {
                                 }
                                 if ($usage) {
                                     $ev | Add-Member -NotePropertyName "usage" -NotePropertyValue @{
-                                        input_tokens                = [int]($usage.input_tokens ?? 0)
-                                        output_tokens               = [int]($usage.output_tokens ?? 0)
-                                        cache_creation_input_tokens = [int]($usage.cache_creation_input_tokens ?? 0)
-                                        cache_read_input_tokens     = [int]($usage.cache_read_input_tokens ?? 0)
+                                        input_tokens                = [int](if ($null -ne $usage.input_tokens) { $usage.input_tokens } else { 0 })
+                                        output_tokens               = [int](if ($null -ne $usage.output_tokens) { $usage.output_tokens } else { 0 })
+                                        cache_creation_input_tokens = [int](if ($null -ne $usage.cache_creation_input_tokens) { $usage.cache_creation_input_tokens } else { 0 })
+                                        cache_read_input_tokens     = [int](if ($null -ne $usage.cache_read_input_tokens) { $usage.cache_read_input_tokens } else { 0 })
                                     } -Force
                                 }
                                 $newMessages.Add($ev)
@@ -182,10 +199,10 @@ try {
                                     }
                                     if ($usage) {
                                         $ev | Add-Member -NotePropertyName "usage" -NotePropertyValue @{
-                                            input_tokens                = [int]($usage.input_tokens ?? 0)
-                                            output_tokens               = [int]($usage.output_tokens ?? 0)
-                                            cache_creation_input_tokens = [int]($usage.cache_creation_input_tokens ?? 0)
-                                            cache_read_input_tokens     = [int]($usage.cache_read_input_tokens ?? 0)
+                                            input_tokens                = [int](if ($null -ne $usage.input_tokens) { $usage.input_tokens } else { 0 })
+                                            output_tokens               = [int](if ($null -ne $usage.output_tokens) { $usage.output_tokens } else { 0 })
+                                            cache_creation_input_tokens = [int](if ($null -ne $usage.cache_creation_input_tokens) { $usage.cache_creation_input_tokens } else { 0 })
+                                            cache_read_input_tokens     = [int](if ($null -ne $usage.cache_read_input_tokens) { $usage.cache_read_input_tokens } else { 0 })
                                         } -Force
                                     }
                                     $newMessages.Add($ev)

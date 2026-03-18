@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 
 type Platform = "linux" | "windows";
 
@@ -61,11 +60,6 @@ export default function ProfilePage() {
 
   return (
     <div style={{ maxWidth: 520, margin: "3rem auto", padding: "0 1rem" }}>
-      {/* Header */}
-      <div style={{ marginBottom: "1.5rem", display: "flex", alignItems: "center", gap: "0.75rem" }}>
-        <Link href="/" style={{ color: "var(--text-muted)", fontSize: "0.8rem", textDecoration: "none" }}>← Trang chủ</Link>
-      </div>
-
       {/* Profile card */}
       <div className="card" style={{ marginBottom: "1rem" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1.5rem" }}>
@@ -185,6 +179,16 @@ export default function ProfilePage() {
 
         {/* Actions */}
         <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+          <button
+            onClick={() => router.push("/")}
+            style={{
+              background: "var(--accent)", border: "none", borderRadius: 6,
+              padding: "0.4rem 1rem", fontSize: "0.8rem",
+              color: "#fff", cursor: "pointer", fontWeight: 600,
+            }}
+          >
+            Trang chủ
+          </button>
           <button
             onClick={logout}
             style={{
