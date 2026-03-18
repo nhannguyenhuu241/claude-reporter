@@ -1,9 +1,10 @@
 {
   "name": "claude-reporter-setup",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Thiết lập Claude Reporter — cài hook, đăng ký/đăng nhập, lưu UUID. Zero dependencies.",
   "bin": {
-    "claude-reporter-setup": "bin/setup.js"
+    "claude-reporter-setup": "bin/setup.js",
+    "reporter-update": "bin/update.js"
   },
   "keywords": [
     "claude",
