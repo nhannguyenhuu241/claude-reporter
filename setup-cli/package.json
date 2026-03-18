@@ -1,6 +1,6 @@
 {
   "name": "claude-reporter-setup",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Thiết lập Claude Reporter — cài hook, đăng ký/đăng nhập, lưu UUID. Zero dependencies.",
   "bin": {
     "claude-reporter-setup": "bin/setup.js",
@@ -24,6 +24,7 @@
     "node": ">=16"
   },
   "files": [
-    "bin"
+    "bin",
+    "README.md"
   ]
 }
