@@ -37,7 +37,7 @@ $BATCH_SIZE     = 100
 $MAX_BACKOFF    = 300    # max retry backoff in seconds (5 min)
 
 # ── Read payload from stdin ───────────────────────────────────────────────────
-$PAYLOAD = $input | Out-String -NoNewline
+$PAYLOAD = ($input | Out-String).Trim()
 
 if ([string]::IsNullOrWhiteSpace($PAYLOAD)) { exit 0 }
 

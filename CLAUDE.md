@@ -68,6 +68,7 @@ cp .env.example .env
 # Create/push database schema
 npm run db:push          # push schema to PostgreSQL
 npm run db:migrate       # create migration
+npm run db:studio        # open Prisma Studio GUI
 
 # Development server
 npm run dev              # → http://localhost:3456
@@ -160,13 +161,13 @@ Custom Next.js server that attaches Socket.IO for real-time WebSocket updates. S
 #### Database (`web/prisma/schema.prisma`)
 PostgreSQL with 4 models:
 - **`Department`** — Organization units
-- **`User`** — Members with email, role (`member` / `dept_head`), department association
+- **`User`** — Members with email, passwordHash, role (`member` / `dept_head`), department association, machineId for retroactive session claim
 - **`Session`** — Claude Code sessions with aggregated token usage (input, output, cache creation, cache read)
 - **`Event`** — Granular events with deduplication via `(sessionId, entryUuid)` unique constraint
 
 #### Hooks (`web/hooks/` and `web/public/hooks/`)
 - **`reporter.sh`** — Main hook script (bash/macOS/Linux). Batched delivery with offline queue & retry. Captures all assistant messages by tracking last-read UUID. Events queued locally then flushed every 30s. Deduplication via `entry_uuid`. Exponential backoff on failure.
-- **`reporter.ps1`** — PowerShell hook script for Windows (served at `/hooks/reporter.ps1`)
+- **`reporter.ps1`** — PowerShell hook script for Windows (served at `/hooks/reporter.ps1`). Flush interval is 90s (longer than bash for better batching on Windows).
 - **`reporter-replay.sh`** — Replay historical JSONL transcripts to the server
 - **`install.sh`** — One-time setup per machine (macOS/Linux); configures Claude Code to call reporter.sh
 - **`claude-settings.json`** — Hook configuration template
@@ -194,6 +195,8 @@ PostgreSQL with 4 models:
 | `GET /api/departments` | List departments (public) |
 | `POST /api/auth/register` | Register email, get UUID |
 | `GET /api/auth/verify/[uuid]` | Validate UUID |
+| `GET /api/auth/me` | Get current user session |
+| `POST /api/auth/logout` | Logout |
 | `*/api/admin/*` | Admin CRUD (users, departments, projects, reset, login) |
 | `GET /api/install` | Bash installer (macOS/Linux) |
 | `GET /api/install/windows` | PowerShell installer (Windows) |
@@ -206,6 +209,8 @@ PostgreSQL with 4 models:
 - **`NavBar.tsx`** — Navigation bar
 - **`UserBadge.tsx`** — User identification badge
 - **`UserProfile.tsx`** — User profile display
+- **`ErrorBanner.tsx`** — Dismissible error/warning/info banner with retry support
+- **`Toast.tsx`** — Context-based toast notification system (success, error, warning, info)
 
 #### Libraries (`web/src/lib/`)
 - **`prisma.ts`** — Prisma client singleton
@@ -214,15 +219,18 @@ PostgreSQL with 4 models:
 - **`rateLimiter.ts`** — API rate limiting
 - **`reportUtils.ts`** — Report generation utilities
 - **`socket.ts`** — Socket.IO client helper
+- **`userAuth.ts`** — User session management (cookie-based auth with bcryptjs password hashing)
 - **`useAutoRefresh.ts`** — Custom hook for auto-refreshing data
 
 #### Pages (`web/src/app/`)
 - `/` — Home page
-- `/login` — Login
+- `/login` — Login (rate-limited: 10 attempts per 5 min per IP)
 - `/sessions` — Session browser
-- `/report` — Usage reports  
+- `/report` — Usage reports
+- `/profile` — User profile with installer script download (Linux/Windows)
 - `/dept` — Department view
 - `/admin` — Admin dashboard
+- `/unauthorized` — Unauthorized access page
 
 ---
 
@@ -276,3 +284,4 @@ The web dashboard supports Docker deployment (`web/Dockerfile`, `web/docker-comp
 - `ADMIN_PASSWORD` — Admin dashboard password
 - `GEMINI_API_KEY` — For AI-powered analysis (`/api/analyze`)
 - `REDIS_URL` — Optional; enables Socket.IO horizontal scaling via Redis adapter
+- `ALLOWED_ORIGINS` — CORS allowed origins (configured in `server.ts`)
