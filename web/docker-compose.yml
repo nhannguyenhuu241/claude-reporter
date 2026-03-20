@@ -3,7 +3,9 @@ services:
     image: redis:7-alpine
     container_name: claude-reporter-redis
     restart: always
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # AOF with everysec fsync: at most 1 second of job loss on crash (vs 15 min with RDB default).
+    # noeviction: never silently drop BullMQ jobs when memory is full.
+    command: redis-server --maxmemory 256mb --maxmemory-policy noeviction --appendonly yes --appendfsync everysec
     volumes:
       - redis_data:/data
     healthcheck:

@@ -36,6 +36,8 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.ts ./next.config.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 COPY --from=builder /app/server.ts ./server.ts
+# src/ is needed at runtime: server.ts imports lib files (worker, queue, prisma) via tsx
+COPY --from=builder /app/src ./src
 
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

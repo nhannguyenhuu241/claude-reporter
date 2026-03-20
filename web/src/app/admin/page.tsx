@@ -56,7 +56,20 @@ function relTime(iso: string | null) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-type Tab = "departments" | "users" | "projects" | "sessions";
+type Tab = "departments" | "users" | "projects" | "sessions" | "system";
+
+interface QueueHealth {
+  queue: { waiting: number; active: number; completed: number; failed: number; delayed: number; ok: boolean };
+  failedJobs: Array<{ id: string; failedReason: string; timestamp: number; attemptsMade: number; eventCount: number }>;
+  redis: { ok: boolean; usedMemory: string; maxMemory: string; connectedClients: number; evictionPolicy: string };
+  db: { ok: boolean; latencyMs: number };
+  ingestionRate: Array<{ minute: string; count: number }>;
+  eventsLast5m: number;
+  eventsLastHour: number;
+  topUsers: Array<{ email: string; count: number }>;
+  dedupHealth: { total: number; noUuid: number; ratio: number };
+  timestamp: string;
+}
 
 export default function AdminPage() {
   const [email, setEmail] = useState("");
@@ -70,6 +83,10 @@ export default function AdminPage() {
   const [anonymousSessions, setAnonymousSessions] = useState(0);
   const [loading, setLoading] = useState(false);
 
+  const [sysHealth, setSysHealth] = useState<QueueHealth | null>(null);
+  const [sysLoading, setSysLoading] = useState(false);
+  const [queueAction, setQueueAction] = useState("");
+
   const [newDeptName, setNewDeptName] = useState("");
   const [deptCreating, setDeptCreating] = useState(false);
   const [deptError, setDeptError] = useState("");
@@ -79,6 +96,36 @@ export default function AdminPage() {
     // Try auto-login via existing cookie
     loadAll();
   }, []);
+
+  // Auto-refresh system health every 10s when on system tab
+  useEffect(() => {
+    if (tab !== "system" || !authenticated) return;
+    loadSysHealth();
+    const id = setInterval(loadSysHealth, 10_000);
+    return () => clearInterval(id);
+  }, [tab, authenticated]);
+
+  async function loadSysHealth() {
+    setSysLoading(true);
+    try {
+      const res = await fetch("/api/admin/queue");
+      if (res.ok) setSysHealth(await res.json());
+    } catch { /* ignore */ }
+    setSysLoading(false);
+  }
+
+  async function doQueueAction(action: string, jobId?: string) {
+    setQueueAction(action);
+    try {
+      await fetch("/api/admin/queue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, jobId }),
+      });
+      await loadSysHealth();
+    } catch { /* ignore */ }
+    setQueueAction("");
+  }
 
   async function loadAll() {
     setLoading(true);
@@ -395,14 +442,15 @@ export default function AdminPage() {
           { key: "users", label: `👤 Users (${users.length})` },
           { key: "projects", label: `📁 Projects (${projects.length})` },
           { key: "sessions", label: "🗂 Sessions" },
+          { key: "system", label: sysHealth?.queue.failed ? `⚠️ System (${sysHealth.queue.failed} lỗi)` : "⚙️ System" },
         ] as { key: Tab; label: string }[]).map(({ key, label }) => (
           <button
             key={key}
             onClick={() => setTab(key)}
             style={{
-              background: tab === key ? "var(--accent)" : "var(--surface)",
-              color: tab === key ? "#fff" : "var(--text-muted)",
-              border: "1px solid var(--border)",
+              background: tab === key ? "var(--accent)" : key === "system" && sysHealth?.queue.failed ? "rgba(239,68,68,0.12)" : "var(--surface)",
+              color: tab === key ? "#fff" : key === "system" && sysHealth?.queue.failed ? "#ef4444" : "var(--text-muted)",
+              border: key === "system" && sysHealth?.queue.failed ? "1px solid #ef4444" : "1px solid var(--border)",
               borderRadius: 5,
               padding: "4px 14px",
               fontSize: "0.8rem",
@@ -730,6 +778,206 @@ export default function AdminPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+      {/* System Health tab */}
+      {tab === "system" && (
+        <div>
+          {/* Toolbar */}
+          <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: "0.78rem", color: "var(--text-muted)" }}>
+              {sysHealth ? `Cập nhật: ${new Date(sysHealth.timestamp).toLocaleTimeString()}` : "Đang tải…"}
+            </span>
+            <button onClick={loadSysHealth} disabled={sysLoading}
+              style={{ marginLeft: "auto", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 5, padding: "4px 12px", fontSize: "0.78rem", cursor: "pointer", color: "var(--text-muted)" }}>
+              {sysLoading ? "…" : "↻ Làm mới"}
+            </button>
+            {sysHealth?.queue.failed && sysHealth.queue.failed > 0 ? (
+              <button onClick={() => doQueueAction("retry_all")} disabled={!!queueAction}
+                style={{ background: "#f97316", color: "#fff", border: "none", borderRadius: 5, padding: "4px 12px", fontSize: "0.78rem", cursor: "pointer", fontWeight: 600 }}>
+                {queueAction === "retry_all" ? "…" : `↺ Retry ${sysHealth.queue.failed} lỗi`}
+              </button>
+            ) : null}
+            {sysHealth?.queue.waiting && sysHealth.queue.waiting > 0 ? (
+              <button onClick={() => { if (confirm("Drain toàn bộ queue đang chờ?")) doQueueAction("drain"); }} disabled={!!queueAction}
+                style={{ background: "none", border: "1px solid #ef4444", borderRadius: 5, padding: "4px 12px", fontSize: "0.78rem", cursor: "pointer", color: "#ef4444" }}>
+                {queueAction === "drain" ? "…" : "🗑 Drain queue"}
+              </button>
+            ) : null}
+          </div>
+
+          {/* Status cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "0.75rem", marginBottom: "1.25rem" }}>
+            {/* Queue */}
+            {[
+              { label: "Queue waiting", value: sysHealth?.queue.waiting ?? "…", color: (sysHealth?.queue.waiting ?? 0) > 50 ? "#f97316" : "var(--green)" },
+              { label: "Queue active", value: sysHealth?.queue.active ?? "…", color: "var(--accent)" },
+              { label: "Queue failed", value: sysHealth?.queue.failed ?? "…", color: (sysHealth?.queue.failed ?? 0) > 0 ? "#ef4444" : "var(--green)" },
+              { label: "Events / 5m", value: sysHealth?.eventsLast5m ?? "…", color: "var(--yellow)" },
+              { label: "Events / 1h", value: sysHealth?.eventsLastHour ?? "…", color: "var(--text-muted)" },
+              { label: "No-UUID events (1h)", value: sysHealth ? `${sysHealth.dedupHealth.noUuid} (${sysHealth.dedupHealth.ratio}%)` : "…",
+                color: (sysHealth?.dedupHealth.ratio ?? 0) > 30 ? "#f97316" : "var(--green)" },
+            ].map((c) => (
+              <div key={c.label} className="card" style={{ padding: "0.75rem 1rem" }}>
+                <div style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>{c.label}</div>
+                <div style={{ color: c.color, fontSize: "1.4rem", fontWeight: 700 }}>{String(c.value)}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Infrastructure status */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "0.75rem", marginBottom: "1.25rem" }}>
+            <div className="card" style={{ padding: "0.85rem 1rem" }}>
+              <div style={{ fontWeight: 600, fontSize: "0.8rem", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ color: sysHealth?.db.ok ? "var(--green)" : "#ef4444" }}>●</span> PostgreSQL
+              </div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                {sysHealth?.db.ok ? `Latency: ${sysHealth.db.latencyMs}ms` : "Không kết nối được"}
+              </div>
+            </div>
+            <div className="card" style={{ padding: "0.85rem 1rem" }}>
+              <div style={{ fontWeight: 600, fontSize: "0.8rem", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ color: sysHealth?.redis.ok ? "var(--green)" : "#ef4444" }}>●</span> Redis
+              </div>
+              {sysHealth?.redis.ok ? (
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
+                  <div>Memory: {sysHealth.redis.usedMemory} / {sysHealth.redis.maxMemory}</div>
+                  <div>Clients: {sysHealth.redis.connectedClients}</div>
+                  <div style={{ color: sysHealth.redis.evictionPolicy !== "noeviction" ? "#f97316" : "var(--text-muted)" }}>
+                    Policy: {sysHealth.redis.evictionPolicy}
+                    {sysHealth.redis.evictionPolicy !== "noeviction" && " ⚠️"}
+                  </div>
+                </div>
+              ) : <div style={{ fontSize: "0.75rem", color: "#ef4444" }}>Không kết nối được</div>}
+            </div>
+            <div className="card" style={{ padding: "0.85rem 1rem" }}>
+              <div style={{ fontWeight: 600, fontSize: "0.8rem", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ color: sysHealth?.queue.ok ? "var(--green)" : "#ef4444" }}>●</span> BullMQ Worker
+              </div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", lineHeight: 1.6 }}>
+                <div>Completed: {sysHealth?.queue.completed ?? "…"}</div>
+                <div>Delayed: {sysHealth?.queue.delayed ?? "…"}</div>
+                <div style={{ color: (sysHealth?.queue.failed ?? 0) > 0 ? "#ef4444" : "var(--text-muted)" }}>
+                  Failed: {sysHealth?.queue.failed ?? "…"}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "1.25rem" }}>
+            {/* Ingestion rate chart (mini bar) */}
+            <div className="card" style={{ padding: "0.85rem 1rem" }}>
+              <div style={{ fontWeight: 600, fontSize: "0.8rem", marginBottom: "0.6rem" }}>Ingestion rate (30 phút gần nhất)</div>
+              {sysHealth?.ingestionRate.length ? (
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 48 }}>
+                  {(() => {
+                    const max = Math.max(...sysHealth.ingestionRate.map((r) => r.count), 1);
+                    // Fill up to 30 buckets
+                    const now = Date.now();
+                    const buckets = Array.from({ length: 30 }, (_, i) => {
+                      const t = new Date(Math.floor((now - (29 - i) * 60_000) / 60_000) * 60_000).toISOString().slice(0, 16) + ":00.000Z";
+                      const match = sysHealth.ingestionRate.find((r) => r.minute.slice(0, 16) === t.slice(0, 16));
+                      return match?.count ?? 0;
+                    });
+                    return buckets.map((v, i) => (
+                      <div key={i} title={`${v} events`} style={{
+                        flex: 1, height: `${Math.max(2, (v / max) * 100)}%`,
+                        background: v > max * 0.7 ? "#f97316" : "var(--accent)",
+                        borderRadius: 2, opacity: 0.85,
+                      }} />
+                    ));
+                  })()}
+                </div>
+              ) : (
+                <div style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>Không có dữ liệu</div>
+              )}
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                <span style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>30m trước</span>
+                <span style={{ fontSize: "0.65rem", color: "var(--text-muted)" }}>Hiện tại</span>
+              </div>
+            </div>
+
+            {/* Top users by volume */}
+            <div className="card" style={{ padding: "0.85rem 1rem" }}>
+              <div style={{ fontWeight: 600, fontSize: "0.8rem", marginBottom: "0.6rem" }}>Top users (1 giờ qua)</div>
+              {sysHealth?.topUsers.length ? (
+                <div>
+                  {sysHealth.topUsers.map((u) => {
+                    const maxCount = sysHealth.topUsers[0]?.count ?? 1;
+                    return (
+                      <div key={u.email} style={{ marginBottom: 4 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.72rem", marginBottom: 2 }}>
+                          <span style={{ color: "var(--text)" }}>{u.email.split("@")[0]}</span>
+                          <span style={{ color: "var(--text-muted)" }}>{u.count} events</span>
+                        </div>
+                        <div style={{ height: 4, background: "var(--surface)", borderRadius: 2 }}>
+                          <div style={{ height: "100%", width: `${(u.count / maxCount) * 100}%`, background: "var(--accent)", borderRadius: 2 }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : <div style={{ color: "var(--text-muted)", fontSize: "0.75rem" }}>Không có activity trong 1h</div>}
+            </div>
+          </div>
+
+          {/* Failed jobs table */}
+          {sysHealth?.failedJobs.length ? (
+            <div className="card" style={{ padding: "0.85rem 1rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
+                <div style={{ fontWeight: 600, fontSize: "0.85rem", color: "#ef4444" }}>
+                  Failed Jobs ({sysHealth.failedJobs.length})
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem" }}>
+                  <button onClick={() => doQueueAction("retry_all")} disabled={!!queueAction}
+                    style={{ background: "#f97316", color: "#fff", border: "none", borderRadius: 5, padding: "3px 10px", fontSize: "0.75rem", cursor: "pointer" }}>
+                    {queueAction === "retry_all" ? "…" : "↺ Retry All"}
+                  </button>
+                  <button onClick={() => { if (confirm("Xóa tất cả failed jobs?")) doQueueAction("clean_failed"); }} disabled={!!queueAction}
+                    style={{ background: "none", border: "1px solid #ef4444", borderRadius: 5, padding: "3px 10px", fontSize: "0.75rem", cursor: "pointer", color: "#ef4444" }}>
+                    🗑 Clear All
+                  </button>
+                </div>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.75rem" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      {["Job ID", "Events", "Attempts", "Thời gian", "Lỗi", ""].map((h) => (
+                        <th key={h} style={{ padding: "5px 8px", textAlign: "left", color: "var(--text-muted)", fontWeight: 500 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sysHealth.failedJobs.map((j) => (
+                      <tr key={j.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <td style={{ padding: "6px 8px", color: "var(--text-muted)", fontFamily: "monospace" }}>{j.id.slice(0, 8)}…</td>
+                        <td style={{ padding: "6px 8px" }}>{j.eventCount}</td>
+                        <td style={{ padding: "6px 8px", color: j.attemptsMade >= 3 ? "#ef4444" : "var(--text)" }}>{j.attemptsMade}/3</td>
+                        <td style={{ padding: "6px 8px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                          {j.timestamp ? relTime(new Date(j.timestamp).toISOString()) : "—"}
+                        </td>
+                        <td style={{ padding: "6px 8px", color: "#ef4444", maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                          title={j.failedReason}>
+                          {j.failedReason.slice(0, 80)}
+                        </td>
+                        <td style={{ padding: "6px 8px" }}>
+                          <button onClick={() => doQueueAction("retry", j.id)} disabled={!!queueAction}
+                            style={{ background: "none", border: "1px solid var(--accent)", borderRadius: 4, padding: "2px 8px", fontSize: "0.7rem", cursor: "pointer", color: "var(--accent)" }}>
+                            {queueAction === `retry${j.id}` ? "…" : "↺ Retry"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : sysHealth ? (
+            <div className="card" style={{ padding: "1rem", textAlign: "center", color: "var(--green)", fontSize: "0.85rem" }}>
+              ✓ Không có failed jobs — hệ thống hoạt động bình thường
+            </div>
+          ) : null}
         </div>
       )}
     </div>

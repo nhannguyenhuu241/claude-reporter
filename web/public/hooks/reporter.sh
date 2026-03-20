@@ -12,6 +12,34 @@
 
 SERVER_URL="${CLAUDE_REPORTER_URL:-https://vibe-reporter.onebot-training.meobeo.ai}"
 
+# ── Status / manual flush commands ────────────────────────────────────────────
+if [[ "${1:-}" == "--status" ]]; then
+  QUEUE_FILE="$HOME/.claude-reporter-queue.jsonl"
+  OVERFLOW_FILE="$HOME/.claude-reporter-queue.overflow"
+  FLUSH_TS_FILE="$HOME/.claude-reporter-lastflush"
+  LIVE=$(wc -l < "$QUEUE_FILE" 2>/dev/null || echo 0)
+  OVF=$(wc -l < "$OVERFLOW_FILE" 2>/dev/null || echo 0)
+  LAST=$(cat "$FLUSH_TS_FILE" 2>/dev/null || echo 0)
+  LAST_AGO=$(( $(date +%s) - LAST ))
+  echo "Claude Reporter queue status:"
+  echo "  Live queue : $LIVE events  (~$HOME/.claude-reporter-queue.jsonl)"
+  echo "  Overflow   : $OVF events  (~$HOME/.claude-reporter-queue.overflow)"
+  echo "  Total      : $(( LIVE + OVF )) events pending"
+  echo "  Last flush : ${LAST_AGO}s ago"
+  echo "  Server     : $SERVER_URL"
+  exit 0
+fi
+
+if [[ "${1:-}" == "--flush" ]]; then
+  echo "Manual flush triggered — use 'reporter.sh --status' to check result."
+  # Force flush by resetting last-flush timestamp to 0
+  echo 0 > "$HOME/.claude-reporter-lastflush" 2>/dev/null || true
+  rm -f "$HOME/.claude-reporter-lastflush.backoff" 2>/dev/null || true
+  # Re-invoke self with a dummy Stop payload to trigger full flush logic
+  echo '{"hook_event_name":"Notification","type":"manual_flush","session_id":"__flush__"}' | "$0"
+  exit 0
+fi
+
 # ── Self-update ────────────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--update" ]]; then
   SCRIPT_PATH="$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")"
@@ -33,10 +61,20 @@ QUEUE_FILE="$HOME/.claude-reporter-queue.jsonl"
 OVERFLOW_FILE="$HOME/.claude-reporter-queue.overflow"  # archive for trimmed events (replayed later)
 FLUSH_TS_FILE="$HOME/.claude-reporter-lastflush"
 STATE_DIR="$HOME/.claude-reporter-state"
-FLUSH_INTERVAL=30     # seconds between flush attempts
-QUEUE_MAX_LINES=20000 # hard cap on live queue; overflow archived to OVERFLOW_FILE
-BATCH_SIZE=100        # must match server MAX_BATCH_SIZE
-MAX_BACKOFF=300       # max retry backoff in seconds (5 min)
+FLUSH_INTERVAL=300      # seconds between flush attempts (~5 min)
+QUEUE_MAX_LINES=20000   # hard cap on live queue; overflow archived to OVERFLOW_FILE
+BATCH_SIZE=100          # must match server MAX_BATCH_SIZE
+MAX_BACKOFF=300         # max retry backoff in seconds (5 min)
+QUEUE_FLUSH_THRESHOLD=500  # flush immediately if queue grows this large
+
+# ── Crash recovery: restore any leftover temp files from previous crash ────────
+# If the machine crashed mid-flush, .sending.* files are orphaned. Re-queue them.
+for _STALE in "${QUEUE_FILE}".sending.*; do
+  [[ -f "$_STALE" ]] || continue
+  cat "$_STALE" >> "$QUEUE_FILE" 2>/dev/null || true
+  rm -f "$_STALE" 2>/dev/null || true
+done
+unset _STALE
 
 # ── Read payload from stdin ───────────────────────────────────────────────────
 PAYLOAD=$(cat)
@@ -210,11 +248,14 @@ try:
                 except Exception:
                     pass
 
-            # Save state — non-fatal if it fails
+            # Save state atomically — write to temp then rename (POSIX atomic).
+            # Prevents corrupted state file if process is killed mid-write.
             try:
                 if latest_uuid and latest_uuid != last_uuid:
-                    with open(state_file, "w") as sf:
+                    tmp_state = state_file + ".tmp"
+                    with open(tmp_state, "w") as sf:
                         sf.write(latest_uuid)
+                    os.replace(tmp_state, state_file)
             except Exception:
                 pass
 
@@ -287,10 +328,20 @@ LAST_FLUSH=0
 [[ -f "$FLUSH_TS_FILE" ]] && LAST_FLUSH=$(cat "$FLUSH_TS_FILE" 2>/dev/null || echo 0)
 ELAPSED=$(( NOW - LAST_FLUSH ))
 
+# Adaptive flush: if queue is large, force flush regardless of timer
+CURRENT_LINES=$(wc -l < "$QUEUE_FILE" 2>/dev/null || echo 0)
+if (( CURRENT_LINES >= QUEUE_FLUSH_THRESHOLD )); then
+  ELAPSED=$FLUSH_INTERVAL  # force flush by making elapsed >= interval
+fi
+
 [[ $ELAPSED -lt $FLUSH_INTERVAL ]] && exit 0
 
-# ── Flush: atomically move queue and POST /api/events/batch in chunks ────────
+# ── Flush: use flock to prevent concurrent flush races across multiple sessions ─
+# If another Claude Code session is already flushing, skip — events are queued.
+FLUSH_LOCK="${QUEUE_FILE}.flush.lock"
 TEMP_QUEUE="${QUEUE_FILE}.sending.$$"
+(
+flock -n 200 || { rm -f "$TEMP_QUEUE" 2>/dev/null; exit 0; }
 if mv "$QUEUE_FILE" "$TEMP_QUEUE" 2>/dev/null; then
   date +%s > "$FLUSH_TS_FILE" 2>/dev/null || true
 
@@ -333,31 +384,49 @@ for i in range(0, len(events), batch_size):
   SENT_CHUNKS=0
 
   if [[ -n "$SEND_RESULT" ]]; then
-    # Process each chunk line
+    # Process each chunk in parallel (max 5 concurrent curl jobs)
+    _CHUNK_PIDS=()
+    _CHUNK_RESULT_FILES=()
+    _CHUNK_IDX=0
+
     while IFS= read -r CHUNK_JSON; do
       [[ -z "$CHUNK_JSON" ]] && continue
       TOTAL_CHUNKS=$(( TOTAL_CHUNKS + 1 ))
-
-      HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+      _RFILE=$(mktemp)
+      _CHUNK_RESULT_FILES+=("$_RFILE")
+      _CHUNK_IDX=$(( _CHUNK_IDX + 1 ))
+      curl -s -o /dev/null -w "%{http_code}" \
         --max-time 15 \
         -X POST "$SERVER_URL/api/events/batch" \
         -H 'Content-Type: application/json' \
-        -d "$CHUNK_JSON" 2>/dev/null)
+        -d "$CHUNK_JSON" > "$_RFILE" 2>/dev/null &
+      _CHUNK_PIDS+=($!)
+      # Throttle: max 5 parallel curl jobs
+      if (( ${#_CHUNK_PIDS[@]} >= 5 )); then
+        for _PID in "${_CHUNK_PIDS[@]}"; do wait "$_PID" 2>/dev/null || true; done
+        _CHUNK_PIDS=()
+      fi
+    done <<< "$SEND_RESULT"
+    # Wait for remaining
+    for _PID in "${_CHUNK_PIDS[@]}"; do wait "$_PID" 2>/dev/null || true; done
 
-      if [[ "$HTTP_STATUS" =~ ^2 ]]; then
+    # Check all results
+    for _RFILE in "${_CHUNK_RESULT_FILES[@]}"; do
+      _STATUS=$(cat "$_RFILE" 2>/dev/null || echo "000")
+      rm -f "$_RFILE" 2>/dev/null || true
+      if [[ "$_STATUS" =~ ^2 ]]; then
         SENT_CHUNKS=$(( SENT_CHUNKS + 1 ))
-      elif [[ "$HTTP_STATUS" == "429" ]]; then
+      elif [[ "$_STATUS" == "429" ]]; then
         # Rate-limited: restore queue and use exponential backoff — do NOT sleep here
         # because the hook runs synchronously inside Claude Code and blocking for 65s
         # would stall the user's session. The queue will be retried on the next flush.
         BATCH_FAILED=1
-        break
       else
-        # Server error / network failure — stop, restore, exponential backoff
+        # Server error / network failure — restore, exponential backoff
         BATCH_FAILED=1
-        break
       fi
-    done <<< "$SEND_RESULT"
+    done
+    unset _CHUNK_PIDS _CHUNK_RESULT_FILES _RFILE _STATUS _PID _CHUNK_IDX
   fi
 
   if [[ "$BATCH_FAILED" -eq 1 ]]; then
@@ -380,25 +449,70 @@ for i in range(0, len(events), batch_size):
     rm -f "$TEMP_QUEUE" 2>/dev/null || true
     rm -f "${FLUSH_TS_FILE}.backoff" 2>/dev/null || true
 
-    # If overflow archive exists, fold events back into live queue for next flush.
-    # Use full QUEUE_MAX_LINES capacity (minus current live lines) to drain faster.
-    if [[ -f "$OVERFLOW_FILE" ]] && [[ -s "$OVERFLOW_FILE" ]]; then
-      LIVE_LINES=$(wc -l < "$QUEUE_FILE" 2>/dev/null || echo 0)
-      ROOM=$(( QUEUE_MAX_LINES - LIVE_LINES ))
-      if (( ROOM > 0 )); then
-        # Prepend oldest overflow events to queue so they're sent next flush
-        FOLDED="${QUEUE_FILE}.fold.$$"
-        head -n "$ROOM" "$OVERFLOW_FILE" > "$FOLDED" 2>/dev/null || true
-        [[ -f "$QUEUE_FILE" ]] && cat "$QUEUE_FILE" >> "$FOLDED" 2>/dev/null || true
-        mv "$FOLDED" "$QUEUE_FILE" 2>/dev/null || true
-        # Remove folded lines from overflow
-        REMAINING_OVF="${OVERFLOW_FILE}.tmp.$$"
-        tail -n +$(( ROOM + 1 )) "$OVERFLOW_FILE" > "$REMAINING_OVF" 2>/dev/null || true
-        mv "$REMAINING_OVF" "$OVERFLOW_FILE" 2>/dev/null || true
-        [[ ! -s "$OVERFLOW_FILE" ]] && rm -f "$OVERFLOW_FILE" 2>/dev/null || true
+    # ── Drain overflow immediately (same execution, not next flush) ──────────
+    # With server returning 202 instantly (BullMQ queue), each curl is fast.
+    # We drain the entire overflow file right now — no need to wait for the
+    # next Claude Code event to resume sending.
+    while [[ -f "$OVERFLOW_FILE" ]] && [[ -s "$OVERFLOW_FILE" ]]; do
+      OVF_TEMP="${OVERFLOW_FILE}.sending.$$"
+      # Take up to BATCH_SIZE * 50 lines (5000 events) per loop iteration
+      OVF_CHUNK_LINES=$(( BATCH_SIZE * 50 ))
+      head -n "$OVF_CHUNK_LINES" "$OVERFLOW_FILE" > "$OVF_TEMP" 2>/dev/null || break
+      OVF_REMAINING="${OVERFLOW_FILE}.remaining.$$"
+      tail -n +$(( OVF_CHUNK_LINES + 1 )) "$OVERFLOW_FILE" > "$OVF_REMAINING" 2>/dev/null || true
+
+      OVF_SEND=$(python3 -c '
+import json, sys
+batch_size = int(sys.argv[2]) if len(sys.argv) > 2 else 100
+events = []
+seen_keys = set()
+try:
+    with open(sys.argv[1]) as f:
+        for line in f:
+            line = line.strip()
+            if not line: continue
+            try:
+                ev = json.loads(line)
+                key = (ev.get("session_id",""), ev.get("entry_uuid",""))
+                if key[1] and key in seen_keys: continue
+                seen_keys.add(key)
+                events.append(ev)
+            except Exception: pass
+except Exception: pass
+for i in range(0, len(events), batch_size):
+    print(json.dumps({"events": events[i:i+batch_size]}))
+' "$OVF_TEMP" "$BATCH_SIZE")
+
+      OVF_FAILED=0
+      if [[ -n "$OVF_SEND" ]]; then
+        while IFS= read -r CHUNK_JSON; do
+          [[ -z "$CHUNK_JSON" ]] && continue
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 15 \
+            -X POST "$SERVER_URL/api/events/batch" \
+            -H 'Content-Type: application/json' \
+            -d "$CHUNK_JSON" 2>/dev/null)
+          if [[ ! "$HTTP_STATUS" =~ ^2 ]]; then
+            OVF_FAILED=1
+            break
+          fi
+        done <<< "$OVF_SEND"
       fi
-    fi
+
+      if [[ "$OVF_FAILED" -eq 1 ]]; then
+        # Server went down mid-drain — put overflow back and stop
+        cat "$OVF_TEMP" "$OVF_REMAINING" > "$OVERFLOW_FILE" 2>/dev/null || true
+        rm -f "$OVF_TEMP" "$OVF_REMAINING" 2>/dev/null || true
+        break
+      else
+        # Chunk sent — advance to remaining overflow
+        mv "$OVF_REMAINING" "$OVERFLOW_FILE" 2>/dev/null || true
+        rm -f "$OVF_TEMP" 2>/dev/null || true
+        [[ ! -s "$OVERFLOW_FILE" ]] && rm -f "$OVERFLOW_FILE" 2>/dev/null && break
+      fi
+    done
   fi
 fi
+) 200>"$FLUSH_LOCK"
 
 exit 0

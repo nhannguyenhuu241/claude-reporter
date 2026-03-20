@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { processEvent } from "@/lib/processEvent";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rateLimiter";
+import { getEventQueue } from "@/lib/eventQueue";
 
 const MAX_BATCH_SIZE = 100;
 
@@ -61,27 +62,43 @@ export async function POST(req: NextRequest) {
     for (const u of validUsers) validSet.add(u.id);
   }
 
+  // ── Enqueue via BullMQ when Redis is available ────────────────────────────
+  // API returns 202 immediately; worker processes asynchronously with concurrency=5.
+  // Falls back to inline processing if the queue is unavailable (no Redis / cold start).
+  const queue = getEventQueue();
+  if (queue) {
+    // Filter out invalid events before enqueuing so the worker doesn't need to re-validate.
+    const validEvents = events.filter((event) => {
+      const evUuid = typeof event.user_uuid === "string" && event.user_uuid ? event.user_uuid : null;
+      if (evUuid && !validSet.has(evUuid)) return false;
+      if (event.hook_event_name !== undefined && typeof event.hook_event_name !== "string") return false;
+      return true;
+    });
+
+    if (validEvents.length > 0) {
+      await queue.add("batch", {
+        events: validEvents,
+        validUserIds: Array.from(validSet),
+      });
+    }
+
+    return NextResponse.json({ ok: true, queued: validEvents.length });
+  }
+
+  // ── Fallback: inline processing (no Redis / queue unavailable) ─────────────
   let processed = 0;
   let errors = 0;
 
-  // Process each event sequentially (not in one big DB transaction because
-  // processEvent has socket emissions and nested transactions that can't nest).
-  // Each event is individually atomic via its own internal transaction.
-  // Invalid events are skipped and counted as errors without aborting the batch.
+  // Sessions ensured within this batch — avoids redundant upsert/retroactive-claim
+  // queries when many events arrive for the same session in one batch.
+  const ensuredSessions = new Set<string>();
+
   for (const event of events) {
-    // Skip events whose user_uuid is present but not in the DB (stale / deleted user).
-    // Events without a user_uuid are anonymous and always allowed.
     const evUuid = typeof event.user_uuid === "string" && event.user_uuid ? event.user_uuid : null;
-    if (evUuid && !validSet.has(evUuid)) {
-      errors++;
-      continue;
-    }
-    if (event.hook_event_name !== undefined && typeof event.hook_event_name !== "string") {
-      errors++;
-      continue;
-    }
+    if (evUuid && !validSet.has(evUuid)) { errors++; continue; }
+    if (event.hook_event_name !== undefined && typeof event.hook_event_name !== "string") { errors++; continue; }
     try {
-      await processEvent(event);
+      await processEvent(event, ensuredSessions);
       processed++;
     } catch (err) {
       console.error("[events/batch] Error processing event:", err);
