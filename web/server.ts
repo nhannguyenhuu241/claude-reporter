@@ -12,6 +12,7 @@ import { Server as SocketIOServer } from "socket.io";
 import { createAdapter } from "@socket.io/redis-adapter";
 import { createClient } from "redis";
 import { startEventWorker } from "./src/lib/eventWorker";
+import { startWebhookWorker } from "./src/lib/webhookWorker";
 import type { Worker } from "bullmq";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -24,8 +25,9 @@ const handle = app.getRequestHandler();
 // Singleton reference exported for API routes to emit events
 export let io: SocketIOServer | null = null;
 
-// BullMQ worker — kept alive for the lifetime of the process
+// BullMQ workers — kept alive for the lifetime of the process
 let eventWorker: Worker | null = null;
+let webhookWorker: Worker | null = null;
 
 app.prepare().then(async () => {
   const httpServer = createServer((req, res) => {
@@ -56,8 +58,9 @@ app.prepare().then(async () => {
       io.adapter(createAdapter(pubClient, subClient));
       console.log(`[ws] Redis adapter connected: ${redisUrl}`);
 
-      // Start BullMQ worker now that Redis is confirmed healthy
+      // Start BullMQ workers now that Redis is confirmed healthy
       eventWorker = startEventWorker(redisUrl);
+      webhookWorker = startWebhookWorker(redisUrl);
 
       // Clean disconnect on shutdown
       process.once("SIGTERM", () => { pubClient.quit(); subClient.quit(); });
@@ -106,8 +109,9 @@ app.prepare().then(async () => {
     console.log(`\n[server] ${signal} received — shutting down gracefully`);
     httpServer.close(async () => {
       io?.close();
-      // Gracefully drain the BullMQ worker before exit
+      // Gracefully drain BullMQ workers before exit
       try { await eventWorker?.close(); } catch { /* ignore */ }
+      try { await webhookWorker?.close(); } catch { /* ignore */ }
       // Disconnect via dynamic import to avoid circular dep at module load time
       try {
         const { prisma } = await import("./src/lib/prisma");
