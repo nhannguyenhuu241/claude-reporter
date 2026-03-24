@@ -156,14 +156,18 @@ Components (17 files in `components/`):
 **Stack**: Next.js 15 (App Router) + TypeScript + Prisma + PostgreSQL + Socket.IO + Redis (optional)
 
 #### Server (`web/server.ts`)
-Custom Next.js server that attaches Socket.IO for real-time WebSocket updates. Supports horizontal scaling via Redis adapter when `REDIS_URL` is set. Includes graceful shutdown (SIGTERM/SIGINT).
+Custom Next.js server that attaches Socket.IO for real-time WebSocket updates and starts the BullMQ event worker. Supports horizontal scaling via Redis adapter when `REDIS_URL` is set. Includes graceful shutdown (SIGTERM/SIGINT).
+
+**Batch processing flow**: When `REDIS_URL` is set, `POST /api/events/batch` enqueues jobs via BullMQ and returns `202` immediately; the worker in `server.ts` processes them asynchronously. Without Redis, the route falls back to inline processing — no events are lost.
 
 #### Database (`web/prisma/schema.prisma`)
-PostgreSQL with 4 models:
+PostgreSQL with 6 models:
 - **`Department`** — Organization units
 - **`User`** — Members with email, passwordHash, role (`member` / `dept_head`), department association, machineId for retroactive session claim
 - **`Session`** — Claude Code sessions with aggregated token usage (input, output, cache creation, cache read)
 - **`Event`** — Granular events with deduplication via `(sessionId, entryUuid)` unique constraint
+- **`Webhook`** — Outbound webhooks configured by users; includes URL, event type filters, and signing secret
+- **`WebhookDelivery`** — Delivery history for webhook invocations; tracks HTTP status, payload, and retry attempts
 
 #### Hooks (`web/hooks/` and `web/public/hooks/`)
 - **`reporter.sh`** — Main hook script (bash/macOS/Linux). Batched delivery with offline queue & retry. Captures all assistant messages by tracking last-read UUID. Events queued locally then flushed every 30s. Deduplication via `entry_uuid`. Exponential backoff on failure.
@@ -192,6 +196,8 @@ PostgreSQL with 4 models:
 | `GET /api/report/prompt-quality` | Prompt quality scoring (vague/code-dump heuristics) |
 | `POST /api/analyze` | AI-powered analysis (Gemini) |
 | `GET /api/health` | Health check |
+| `GET /api/admin/queue` | BullMQ queue stats, Redis health, DB latency, ingestion rate |
+| `POST /api/admin/queue` | Queue actions: `retry_all`, `drain`, `pause`, `resume`, `retry`, `clean_failed` |
 | `GET /api/departments` | List departments (public) |
 | `POST /api/auth/register` | Register email, get UUID |
 | `GET /api/auth/verify/[uuid]` | Validate UUID |
@@ -215,6 +221,9 @@ PostgreSQL with 4 models:
 #### Libraries (`web/src/lib/`)
 - **`prisma.ts`** — Prisma client singleton
 - **`processEvent.ts`** — Core event processing logic (upsert sessions, create events, update token aggregates)
+- **`eventQueue.ts`** — BullMQ queue singleton (producer); lazy-initialized from `REDIS_URL`. Returns `null` when Redis is unavailable.
+- **`eventWorker.ts`** — BullMQ worker (consumer); started once in `server.ts`. Processes batch jobs from the `claude-event-batch` queue.
+- **`webhookEvents.ts`** — Webhook event type definitions; exports `WEBHOOK_EVENT_TYPES` constant and `isValidWebhookEventType()` validator
 - **`adminAuth.ts`** — Admin authentication
 - **`rateLimiter.ts`** — API rate limiting
 - **`reportUtils.ts`** — Report generation utilities

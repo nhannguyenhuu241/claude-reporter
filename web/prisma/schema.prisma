@@ -29,6 +29,7 @@ model User {
   department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
 
   sessions Session[]
+  webhooks Webhook[]
 
   @@index([departmentId])
   @@map("users")
@@ -60,6 +61,61 @@ model Session {
   @@index([startedAt]) // date-range queries without userId filter
   @@index([machineId]) // retroactive claim: updateMany by machineId in processEvent
   @@map("sessions")
+}
+
+model Webhook {
+  id          String   @id @default(uuid())
+  targetUrl   String   @map("target_url") @db.Text
+  secret      String   @db.Text
+  description String?
+  events      String[] // e.g. ['session.created', 'event.tool_use']
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // null = admin-global webhook (fires for all users)
+  // non-null = user-scoped webhook (fires for that user's sessions only)
+  userId String? @map("user_id")
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  deliveries WebhookDelivery[]
+
+  // PostgreSQL treats NULL != NULL so multiple admin webhooks (userId=null) with
+  // different targetUrls are allowed; duplicate admin URLs enforced at app level.
+  @@unique([userId, targetUrl])
+  @@index([active])
+  @@map("webhooks")
+}
+
+model WebhookDelivery {
+  id        String  @id @default(uuid())
+  webhookId String  @map("webhook_id")
+  webhook   Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  eventType String @map("event_type") // e.g. "session.created"
+  eventId   String @map("event_id") // unique envelope ID (evt_xxx)
+  payload   Json   @db.JsonB
+
+  // Delivery status: pending | success | failed | dead_letter
+  status       String  @default("pending")
+  statusCode   Int?    @map("status_code")
+  responseBody String? @map("response_body") @db.Text
+  errorMessage String? @map("error_message") @db.Text
+
+  // Retry tracking
+  attempts    Int       @default(0)
+  nextRetryAt DateTime? @map("next_retry_at")
+  latencyMs   Int?      @map("latency_ms")
+
+  // Timestamps
+  createdAt   DateTime  @default(now()) @map("created_at")
+  succeededAt DateTime? @map("succeeded_at")
+  failedAt    DateTime? @map("failed_at")
+
+  @@index([webhookId, createdAt])
+  @@index([status])
+  @@index([eventId])
+  @@map("webhook_deliveries")
 }
 
 model Event {
