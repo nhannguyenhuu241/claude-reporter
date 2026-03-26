@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getUserSession } from "@/lib/userAuth";
+import { getUserFromRequest } from "@/lib/userAuth";
 import { isValidWebhookUrl } from "@/lib/webhookValidation";
 import { isValidWebhookEventType } from "@/lib/webhookEvents";
 
@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ id: string }> };
  * (Intentionally 404 — not 403 — to avoid leaking webhook existence to wrong users.)
  */
 async function getOwnWebhook(req: NextRequest, id: string) {
-  const user = getUserSession(req);
+  const user = await getUserFromRequest(req);
   if (!user) return { error: 401 as const, webhook: null, user: null };
 
   const webhook = await prisma.webhook.findUnique({ where: { id } });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getUserSession } from "@/lib/userAuth";
+import { getUserFromRequest } from "@/lib/userAuth";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -8,7 +8,7 @@ type Ctx = { params: Promise<{ id: string }> };
 // Paginated delivery log for the current user's webhook.
 // Query params: page (default 1), limit (default 50, max 100), status (filter)
 export async function GET(req: NextRequest, { params }: Ctx) {
-  const user = getUserSession(req);
+  const user = await getUserFromRequest(req);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;

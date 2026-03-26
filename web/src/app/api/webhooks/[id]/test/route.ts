@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getUserSession } from "@/lib/userAuth";
+import { getUserFromRequest } from "@/lib/userAuth";
 import { signPayload } from "@/lib/webhookSigning";
 import { buildEnvelope } from "@/lib/webhookPayload";
 import { isValidWebhookUrl } from "@/lib/webhookValidation";
@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ id: string }> };
 // Sends a synchronous test.ping delivery to the configured endpoint.
 // Returns the HTTP response immediately for debugging.
 export async function POST(req: NextRequest, { params }: Ctx) {
-  const user = getUserSession(req);
+  const user = await getUserFromRequest(req);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { id } = await params;

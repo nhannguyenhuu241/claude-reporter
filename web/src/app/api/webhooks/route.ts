@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getUserSession } from "@/lib/userAuth";
+import { getUserFromRequest } from "@/lib/userAuth";
 import { generateWebhookSecret } from "@/lib/webhookSecret";
 import { isValidWebhookUrl } from "@/lib/webhookValidation";
 import { WEBHOOK_EVENT_TYPES, isValidWebhookEventType } from "@/lib/webhookEvents";
@@ -10,7 +10,7 @@ const MAX_WEBHOOKS_PER_USER = 5;
 // ── GET /api/webhooks ──────────────────────────────────────────────────────────
 // List the current user's webhooks (no secret returned).
 export async function GET(req: NextRequest) {
-  const user = getUserSession(req);
+  const user = await getUserFromRequest(req);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const webhooks = await prisma.webhook.findMany({
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
 // Create a user-scoped webhook. Max 5 per user.
 // Secret returned ONLY in this response — never again.
 export async function POST(req: NextRequest) {
-  const user = getUserSession(req);
+  const user = await getUserFromRequest(req);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   // Enforce per-user limit
