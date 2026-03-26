@@ -77,12 +77,21 @@ Use a process manager (PM2, systemd) and a reverse proxy (nginx/Caddy) for HTTPS
 
 ## API Reference
 
-| Endpoint | Description |
-|----------|-------------|
-| `POST /api/events` | Ingest Claude Code hook payload |
-| `GET /api/sessions` | List sessions (paginated) |
-| `GET /api/sessions/:id` | Session detail with all events |
-| `GET /api/stats` | Aggregate stats (tokens, cost, counts) |
+Full API documentation: **[docs/api.md](./docs/api.md)**
+
+Webhook integration guide: **[docs/webhooks.md](./docs/webhooks.md)**
+
+Quick overview:
+
+| Group | Endpoints |
+|---|---|
+| **Ingest** | `POST /api/events`, `POST /api/events/batch` |
+| **Sessions** | `GET /api/sessions`, `GET /api/sessions/:id` |
+| **Stats** | `GET /api/stats`, `GET /api/report`, `GET /api/report/team` |
+| **Auth** | `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me` |
+| **User Webhooks** | `GET/POST /api/webhooks`, `GET/PUT/DELETE /api/webhooks/:id` |
+| **Admin** | `/api/admin/users`, `/api/admin/departments`, `/api/admin/webhooks` |
+| **System** | `GET /api/admin/queue`, `GET /api/health` |
 
 ## Socket.io Events
 
