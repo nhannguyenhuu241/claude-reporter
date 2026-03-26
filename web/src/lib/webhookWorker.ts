@@ -13,24 +13,9 @@ import { Worker, type Job } from "bullmq";
 import { prisma } from "./prisma";
 import { signPayload } from "./webhookSigning";
 import { WEBHOOK_QUEUE_NAME, WEBHOOK_MAX_ATTEMPTS, type WebhookJobData } from "./webhookQueue";
+import { isValidWebhookUrl } from "./webhookValidation";
 
 const TIMEOUT_MS = parseInt(process.env.WEBHOOK_TIMEOUT_MS ?? "30000", 10);
-
-// Block SSRF: only allow public HTTP(S) — reject private/loopback/link-local CIDRs.
-// Primary validation happens at registration (Phase 3); this is a defence-in-depth guard.
-const PRIVATE_IP_RE =
-  /^(localhost|127\.|0\.0\.0\.0|::1|169\.254\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/i;
-
-function isSafeTargetUrl(raw: string): boolean {
-  try {
-    const { protocol, hostname } = new URL(raw);
-    if (protocol !== "http:" && protocol !== "https:") return false;
-    if (PRIVATE_IP_RE.test(hostname)) return false;
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export function startWebhookWorker(redisUrl: string): Worker<WebhookJobData> {
   const worker = new Worker<WebhookJobData>(
@@ -49,7 +34,7 @@ export function startWebhookWorker(redisUrl: string): Worker<WebhookJobData> {
       if (!delivery || !delivery.webhook.active) return;
 
       // Defence-in-depth: re-validate URL before every fetch (SSRF guard)
-      if (!isSafeTargetUrl(delivery.webhook.targetUrl)) {
+      if (!isValidWebhookUrl(delivery.webhook.targetUrl)) {
         await prisma.webhookDelivery.update({
           where: { id: deliveryId },
           data: { status: "dead_letter", failedAt: new Date(), errorMessage: "Blocked: unsafe target URL" },

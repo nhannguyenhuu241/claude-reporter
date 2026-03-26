@@ -11,6 +11,7 @@ export const WEBHOOK_EVENT_TYPES = [
   "event.user_prompt",
   "stats.daily_summary",
   "token_budget.warning",
+  "test.ping", // Synthetic event used only by the test-delivery endpoint
 ] as const;
 
 export type WebhookEventType = (typeof WEBHOOK_EVENT_TYPES)[number];
