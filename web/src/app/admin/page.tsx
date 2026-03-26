@@ -56,7 +56,52 @@ function relTime(iso: string | null) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-type Tab = "departments" | "users" | "projects" | "sessions" | "system";
+type Tab = "departments" | "users" | "projects" | "sessions" | "system" | "webhooks";
+
+interface AdminWebhook {
+  id: string;
+  targetUrl: string;
+  description: string | null;
+  events: string[];
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  user: { id: string; email: string } | null;
+  deliveryCount: number;
+  lastDelivery: { status: string; statusCode: number | null; createdAt: string } | null;
+}
+
+interface WebhookFormState {
+  mode: "create" | "edit";
+  id?: string;
+  targetUrl: string;
+  description: string;
+  events: string[];
+  active: boolean;
+}
+
+interface DeliveryLog {
+  id: string;
+  eventType: string;
+  eventId: string;
+  status: string;
+  statusCode: number | null;
+  attempts: number;
+  latencyMs: number | null;
+  errorMessage: string | null;
+  createdAt: string;
+  succeededAt: string | null;
+  failedAt: string | null;
+}
+
+interface TestResult {
+  webhookId: string;
+  success: boolean;
+  statusCode?: number;
+  responseBody?: string;
+  error?: string;
+  latencyMs: number;
+}
 
 interface QueueHealth {
   queue: { waiting: number; active: number; completed: number; failed: number; delayed: number; ok: boolean };
@@ -92,10 +137,32 @@ export default function AdminPage() {
   const [deptError, setDeptError] = useState("");
   const [editingDept, setEditingDept] = useState<{ id: string; name: string } | null>(null);
 
+  // Webhook state
+  const [webhooks, setWebhooks] = useState<AdminWebhook[]>([]);
+  const [webhookForm, setWebhookForm] = useState<WebhookFormState | null>(null);
+  const [selectedWebhook, setSelectedWebhook] = useState<string | null>(null);
+  const [deliveries, setDeliveries] = useState<DeliveryLog[]>([]);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
+  const [newSecret, setNewSecret] = useState<string | null>(null);
+  const [webhookLoading, setWebhookLoading] = useState(false);
+  const [webhookError, setWebhookError] = useState("");
+
   useEffect(() => {
     // Try auto-login via existing cookie
     loadAll();
   }, []);
+
+  // Load webhooks when switching to webhooks tab; clear stale ephemeral state on every visit
+  useEffect(() => {
+    if (tab === "webhooks" && authenticated) {
+      setTestResult(null);
+      setSelectedWebhook(null);
+      setDeliveries([]);
+      setNewSecret(null); // "shown once" — do not re-surface on tab return
+      fetchWebhooks();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, authenticated]);
 
   // Auto-refresh system health every 10s when on system tab
   useEffect(() => {
@@ -250,6 +317,81 @@ export default function AdminPage() {
       body: JSON.stringify({ role: newRole }),
     });
     await loadAll();
+  }
+
+  async function fetchWebhooks() {
+    setWebhookLoading(true);
+    try {
+      const res = await fetch("/api/admin/webhooks");
+      if (res.ok) setWebhooks((await res.json()).webhooks ?? []);
+    } catch { /* ignore */ }
+    setWebhookLoading(false);
+  }
+
+  async function handleCreateWebhook(form: WebhookFormState) {
+    setWebhookError("");
+    const res = await fetch("/api/admin/webhooks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetUrl: form.targetUrl, events: form.events, description: form.description || undefined }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setNewSecret(data.secret);
+      setWebhookForm(null);
+      fetchWebhooks();
+    } else {
+      setWebhookError(data.error ?? "Lỗi khi tạo webhook");
+    }
+  }
+
+  async function handleUpdateWebhook(form: WebhookFormState) {
+    if (!form.id) return;
+    setWebhookError("");
+    const res = await fetch(`/api/admin/webhooks/${form.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetUrl: form.targetUrl, events: form.events, description: form.description || null, active: form.active }),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      setWebhookForm(null);
+      fetchWebhooks();
+    } else {
+      setWebhookError(data.error ?? "Lỗi khi cập nhật webhook");
+    }
+  }
+
+  async function toggleWebhookActive(id: string, active: boolean) {
+    await fetch(`/api/admin/webhooks/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active }),
+    });
+    fetchWebhooks();
+  }
+
+  async function handleDeleteWebhook(id: string) {
+    if (!confirm("Xóa webhook này và toàn bộ delivery history?")) return;
+    await fetch(`/api/admin/webhooks/${id}`, { method: "DELETE" });
+    if (selectedWebhook === id) setSelectedWebhook(null);
+    fetchWebhooks();
+  }
+
+  async function handleTestWebhook(webhookId: string) {
+    setTestResult(null);
+    const res = await fetch(`/api/admin/webhooks/${webhookId}/test`, { method: "POST" });
+    const data = await res.json();
+    setTestResult({ webhookId, ...data });
+  }
+
+  async function loadDeliveries(webhookId: string) {
+    if (selectedWebhook === webhookId) { setSelectedWebhook(null); return; }
+    const res = await fetch(`/api/admin/webhooks/${webhookId}/deliveries?limit=20`);
+    if (res.ok) {
+      setDeliveries((await res.json()).deliveries ?? []);
+      setSelectedWebhook(webhookId);
+    }
   }
 
   async function handleReset(scope: "sessions" | "all") {
@@ -443,6 +585,7 @@ export default function AdminPage() {
           { key: "projects", label: `📁 Projects (${projects.length})` },
           { key: "sessions", label: "🗂 Sessions" },
           { key: "system", label: sysHealth?.queue.failed ? `⚠️ System (${sysHealth.queue.failed} lỗi)` : "⚙️ System" },
+          { key: "webhooks", label: `🔗 Webhooks (${webhooks.length})` },
         ] as { key: Tab; label: string }[]).map(({ key, label }) => (
           <button
             key={key}
@@ -980,6 +1123,277 @@ export default function AdminPage() {
           ) : null}
         </div>
       )}
+
+      {/* ── Webhooks tab ───────────────────────────── */}
+      {tab === "webhooks" && (
+        <div>
+          {/* Header row */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+            <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>
+              Webhooks {webhookLoading && <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: "0.78rem" }}>Loading…</span>}
+            </div>
+            <button
+              onClick={() => { setWebhookForm({ mode: "create", targetUrl: "", description: "", events: [], active: true }); setWebhookError(""); setNewSecret(null); }}
+              style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 6, padding: "5px 14px", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer" }}
+            >
+              + Tạo Webhook
+            </button>
+          </div>
+
+          {/* Secret banner — shown once after create */}
+          {newSecret && (
+            <div className="card" style={{ background: "rgba(234,179,8,0.1)", border: "1px solid rgba(234,179,8,0.4)", padding: "0.75rem 1rem", marginBottom: "1rem", display: "flex", gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
+              <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "var(--yellow,#f59e0b)" }}>🔑 Webhook secret (hiển thị 1 lần duy nhất — lưu lại ngay):</span>
+              <code style={{ flex: 1, fontSize: "0.78rem", background: "var(--surface)", padding: "3px 8px", borderRadius: 4, wordBreak: "break-all" }}>{newSecret}</code>
+              <button onClick={() => { navigator.clipboard.writeText(newSecret); }}
+                style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 5, padding: "3px 10px", fontSize: "0.75rem", cursor: "pointer" }}>
+                Copy
+              </button>
+              <button onClick={() => setNewSecret(null)}
+                style={{ background: "none", border: "1px solid var(--border)", borderRadius: 5, padding: "3px 10px", fontSize: "0.75rem", cursor: "pointer", color: "var(--text-muted)" }}>
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* Create / Edit form */}
+          {webhookForm && (
+            <WebhookFormPanel
+              form={webhookForm}
+              error={webhookError}
+              onSubmit={(f) => f.mode === "create" ? handleCreateWebhook(f) : handleUpdateWebhook(f)}
+              onCancel={() => { setWebhookForm(null); setWebhookError(""); }}
+            />
+          )}
+
+          {/* Webhook table */}
+          {webhooks.length === 0 && !webhookLoading ? (
+            <div className="card" style={{ padding: "2rem", textAlign: "center", color: "var(--text-muted)", fontSize: "0.85rem" }}>
+              Chưa có webhook nào. Tạo webhook đầu tiên để nhận events.
+            </div>
+          ) : (
+            <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid var(--border)", background: "var(--surface)" }}>
+                    {["Endpoint", "Events", "Owner", "Status", "Last Delivery", "Actions"].map(h => (
+                      <th key={h} style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "var(--text-muted)", fontSize: "0.72rem", textTransform: "uppercase" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {webhooks.map((w) => (
+                    <WebhookRow
+                      key={w.id}
+                      webhook={w}
+                      expanded={selectedWebhook === w.id}
+                      deliveries={selectedWebhook === w.id ? deliveries : []}
+                      testResult={testResult?.webhookId === w.id ? testResult : null}
+                      onTest={() => handleTestWebhook(w.id)}
+                      onToggle={() => toggleWebhookActive(w.id, !w.active)}
+                      onLogs={() => loadDeliveries(w.id)}
+                      onEdit={() => { setWebhookForm({ mode: "edit", id: w.id, targetUrl: w.targetUrl, description: w.description ?? "", events: [...w.events], active: w.active }); setWebhookError(""); }}
+                      onDelete={() => handleDeleteWebhook(w.id)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+// ── Webhook form component ─────────────────────────────────────────────────────
+const WEBHOOK_EVENT_OPTIONS = [
+  { value: "session.created", label: "session.created — new session started" },
+  { value: "session.ended", label: "session.ended — session stopped" },
+  { value: "event.tool_use", label: "event.tool_use — tool executed" },
+  { value: "event.user_prompt", label: "event.user_prompt — user submitted prompt" },
+  { value: "event.assistant_message", label: "event.assistant_message" },
+  { value: "stats.daily_summary", label: "stats.daily_summary" },
+  { value: "token_budget.warning", label: "token_budget.warning" },
+];
+
+function WebhookFormPanel({ form, error, onSubmit, onCancel }: {
+  form: WebhookFormState;
+  error: string;
+  onSubmit: (f: WebhookFormState) => void;
+  onCancel: () => void;
+}) {
+  const [local, setLocal] = useState<WebhookFormState>(form);
+  const inputStyle: React.CSSProperties = {
+    width: "100%", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: 6,
+    padding: "0.45rem 0.75rem", color: "var(--text)", fontSize: "0.83rem", outline: "none", boxSizing: "border-box",
+  };
+  return (
+    <div className="card" style={{ padding: "1rem", marginBottom: "1rem" }}>
+      <div style={{ fontWeight: 600, fontSize: "0.85rem", marginBottom: "0.75rem" }}>
+        {form.mode === "create" ? "Tạo Webhook mới" : "Chỉnh sửa Webhook"}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem", marginBottom: "0.75rem" }}>
+        <div>
+          <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: 4 }}>Endpoint URL *</div>
+          <input type="url" value={local.targetUrl} onChange={e => setLocal({ ...local, targetUrl: e.target.value })}
+            placeholder="https://example.com/webhook" style={inputStyle} />
+        </div>
+        <div>
+          <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: 4 }}>Description</div>
+          <input type="text" value={local.description} onChange={e => setLocal({ ...local, description: e.target.value })}
+            placeholder="Slack, n8n…" style={inputStyle} maxLength={500} />
+        </div>
+      </div>
+      <div style={{ marginBottom: "0.75rem" }}>
+        <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginBottom: 6 }}>Events *</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+          {WEBHOOK_EVENT_OPTIONS.map(opt => (
+            <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.78rem", cursor: "pointer", background: local.events.includes(opt.value) ? "rgba(99,102,241,0.12)" : "var(--surface)", border: `1px solid ${local.events.includes(opt.value) ? "var(--accent)" : "var(--border)"}`, borderRadius: 5, padding: "3px 8px" }}>
+              <input type="checkbox" checked={local.events.includes(opt.value)}
+                onChange={e => setLocal({ ...local, events: e.target.checked ? [...local.events, opt.value] : local.events.filter(x => x !== opt.value) })}
+                style={{ margin: 0 }} />
+              {opt.value}
+            </label>
+          ))}
+        </div>
+      </div>
+      {form.mode === "edit" && (
+        <div style={{ marginBottom: "0.75rem" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.8rem", cursor: "pointer" }}>
+            <input type="checkbox" checked={local.active} onChange={e => setLocal({ ...local, active: e.target.checked })} />
+            Active
+          </label>
+        </div>
+      )}
+      {error && <div style={{ color: "#ef4444", fontSize: "0.78rem", marginBottom: "0.5rem" }}>{error}</div>}
+      <div style={{ display: "flex", gap: "0.5rem" }}>
+        <button onClick={() => onSubmit(local)} disabled={!local.targetUrl || local.events.length === 0}
+          style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 6, padding: "5px 16px", fontSize: "0.8rem", fontWeight: 600, cursor: "pointer", opacity: (!local.targetUrl || local.events.length === 0) ? 0.5 : 1 }}>
+          {form.mode === "create" ? "Tạo" : "Lưu"}
+        </button>
+        <button onClick={onCancel}
+          style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: "5px 12px", fontSize: "0.8rem", cursor: "pointer", color: "var(--text-muted)" }}>
+          Hủy
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Webhook row component ──────────────────────────────────────────────────────
+function WebhookRow({ webhook: w, expanded, deliveries, testResult, onTest, onToggle, onLogs, onEdit, onDelete }: {
+  webhook: AdminWebhook;
+  expanded: boolean;
+  deliveries: DeliveryLog[];
+  testResult: TestResult | null;
+  onTest: () => void;
+  onToggle: () => void;
+  onLogs: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const btnStyle: React.CSSProperties = { background: "none", border: "1px solid var(--border)", borderRadius: 4, padding: "2px 8px", fontSize: "0.7rem", cursor: "pointer", color: "var(--text-muted)" };
+
+  return (
+    <>
+      <tr style={{ borderBottom: "1px solid var(--border)", background: expanded ? "var(--surface)" : "transparent" }}>
+        <td style={{ padding: "8px 12px", maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span title={w.targetUrl} style={{ fontSize: "0.78rem" }}>{w.targetUrl}</span>
+          {w.description && <div style={{ color: "var(--text-muted)", fontSize: "0.68rem" }}>{w.description}</div>}
+        </td>
+        <td style={{ padding: "8px 12px" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+            {w.events.map(e => (
+              <span key={e} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: 3, padding: "1px 5px", fontSize: "0.65rem", color: "var(--text-muted)" }}>{e.replace("event.", "").replace("session.", "s.")}</span>
+            ))}
+          </div>
+        </td>
+        <td style={{ padding: "8px 12px", fontSize: "0.78rem", color: "var(--text-muted)" }}>
+          {w.user?.email ?? <span style={{ color: "var(--accent)", fontSize: "0.72rem" }}>System</span>}
+        </td>
+        <td style={{ padding: "8px 12px" }}>
+          <span style={{ fontSize: "0.75rem", fontWeight: 600, color: w.active ? "var(--green,#22c55e)" : "#ef4444" }}>
+            {w.active ? "● Active" : "○ Disabled"}
+          </span>
+        </td>
+        <td style={{ padding: "8px 12px", fontSize: "0.75rem" }}>
+          {w.lastDelivery ? (
+            <span style={{ color: statusColor(w.lastDelivery.status) }}>
+              {w.lastDelivery.status} {w.lastDelivery.statusCode ? `(${w.lastDelivery.statusCode})` : ""} · {relTime(w.lastDelivery.createdAt)}
+            </span>
+          ) : <span style={{ color: "var(--text-muted)" }}>—</span>}
+          {w.deliveryCount > 0 && <span style={{ color: "var(--text-muted)", fontSize: "0.68rem", marginLeft: 4 }}>{w.deliveryCount} total</span>}
+        </td>
+        <td style={{ padding: "8px 12px" }}>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            <button onClick={onTest} style={{ ...btnStyle, color: "var(--accent)", borderColor: "var(--accent)" }}>⚡ Test</button>
+            <button onClick={onToggle} style={btnStyle}>{w.active ? "Disable" : "Enable"}</button>
+            <button onClick={onLogs} style={{ ...btnStyle, color: expanded ? "var(--accent)" : "var(--text-muted)", borderColor: expanded ? "var(--accent)" : "var(--border)" }}>
+              {expanded ? "▲ Logs" : "▼ Logs"}
+            </button>
+            <button onClick={onEdit} style={btnStyle}>Edit</button>
+            <button onClick={onDelete} style={{ ...btnStyle, color: "#ef4444", borderColor: "#ef4444" }}>Delete</button>
+          </div>
+        </td>
+      </tr>
+
+      {/* Test result row */}
+      {testResult && (
+        <tr style={{ borderBottom: "1px solid var(--border)" }}>
+          <td colSpan={6} style={{ padding: "8px 12px", background: testResult.success ? "rgba(34,197,94,0.06)" : "rgba(239,68,68,0.06)" }}>
+            <div style={{ fontSize: "0.78rem", display: "flex", gap: "1rem", alignItems: "flex-start" }}>
+              <span style={{ fontWeight: 600, color: testResult.success ? "var(--green,#22c55e)" : "#ef4444" }}>
+                {testResult.success ? "✓ Test OK" : "✗ Test failed"} {testResult.statusCode && `· HTTP ${testResult.statusCode}`} · {testResult.latencyMs}ms
+              </span>
+              {testResult.error && <span style={{ color: "#ef4444" }}>{testResult.error}</span>}
+              {testResult.responseBody && (
+                <code style={{ fontSize: "0.7rem", color: "var(--text-muted)", maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {testResult.responseBody}
+                </code>
+              )}
+            </div>
+          </td>
+        </tr>
+      )}
+
+      {/* Delivery logs row */}
+      {expanded && (
+        <tr style={{ borderBottom: "1px solid var(--border)" }}>
+          <td colSpan={6} style={{ padding: "0 12px 10px", background: "var(--surface)" }}>
+            {deliveries.length === 0 ? (
+              <div style={{ padding: "0.5rem 0", color: "var(--text-muted)", fontSize: "0.78rem" }}>Chưa có delivery nào.</div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.73rem", marginTop: 6 }}>
+                <thead>
+                  <tr>
+                    {["Event", "Status", "HTTP", "Attempts", "Latency", "Time", "Error"].map(h => (
+                      <th key={h} style={{ padding: "3px 6px", textAlign: "left", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.65rem", textTransform: "uppercase" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {deliveries.map(d => (
+                    <tr key={d.id} style={{ borderTop: "1px solid var(--border)" }}>
+                      <td style={{ padding: "3px 6px" }}>{d.eventType}</td>
+                      <td style={{ padding: "3px 6px", color: statusColor(d.status), fontWeight: 600 }}>{d.status}</td>
+                      <td style={{ padding: "3px 6px" }}>{d.statusCode ?? "—"}</td>
+                      <td style={{ padding: "3px 6px" }}>{d.attempts}</td>
+                      <td style={{ padding: "3px 6px" }}>{d.latencyMs != null ? `${d.latencyMs}ms` : "—"}</td>
+                      <td style={{ padding: "3px 6px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>{relTime(d.createdAt)}</td>
+                      <td style={{ padding: "3px 6px", color: "#ef4444", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={d.errorMessage ?? ""}>{d.errorMessage ?? ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+
+  function statusColor(s: string) {
+    return ({ success: "var(--green,#22c55e)", failed: "#ef4444", dead_letter: "#f97316", pending: "var(--text-muted)" } as Record<string, string>)[s] ?? "var(--text-muted)";
+  }
 }
