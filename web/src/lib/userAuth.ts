@@ -123,11 +123,52 @@ export async function getUserFromApiCredentials(req: NextRequest): Promise<UserS
 }
 
 /**
- * Combined auth: tries cookie session first, then X-User-Email + X-User-UUID headers.
+ * Password-based auth via request headers:
+ *   X-User-Email:    user@example.com
+ *   X-User-Password: <plaintext password>
+ *
+ * Verifies with bcrypt — same logic as /api/auth/login but stateless (no cookie set).
+ * Only succeeds when the user has a passwordHash set.
+ *
+ * Returns null if headers are missing, user not found, or password is wrong.
+ * Rate limiting must be applied by callers.
+ */
+export async function getUserFromPasswordCredentials(req: NextRequest): Promise<UserSession | null> {
+  const email    = req.headers.get("x-user-email")?.trim().toLowerCase();
+  const password = req.headers.get("x-user-password");
+  if (!email || !password) return null;
+
+  const { compare } = await import("bcryptjs");
+
+  const user = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true, email: true, passwordHash: true, role: true, departmentId: true },
+  });
+
+  // Always run compare to prevent timing-based user enumeration
+  const dummyHash = "$2a$10$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const valid = await compare(password, user?.passwordHash ?? dummyHash);
+  if (!user || !valid) return null;
+
+  return {
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    departmentId: user.departmentId ?? null,
+  };
+}
+
+/**
+ * Combined auth: tries cookie session first, then X-User-Email + X-User-UUID headers,
+ * then X-User-Email + X-User-Password headers.
  * Use this in API routes that should support both browser and programmatic access.
  */
 export async function getUserFromRequest(req: NextRequest): Promise<UserSession | null> {
   const fromCookie = getUserSession(req);
   if (fromCookie) return fromCookie;
-  return getUserFromApiCredentials(req);
+
+  const fromUuid = await getUserFromApiCredentials(req);
+  if (fromUuid) return fromUuid;
+
+  return getUserFromPasswordCredentials(req);
 }

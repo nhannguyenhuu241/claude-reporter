@@ -6,16 +6,18 @@
 |-------|--------|
 | 1 — Database Schema | ✅ DONE — committed `1e062b8` |
 | 2 — Delivery Engine | ✅ DONE — committed `1072b1a` |
-| 3 — Admin API | ⏳ **CODE DONE, CHƯA COMMIT** — đang chờ user approve để commit |
-| 4 — User API | 🔲 Pending |
-| 5 — Event Integration | 🔲 Pending |
-| 6 — Admin UI | 🔲 Pending |
+| 3 — Admin API | ✅ DONE — committed `7c91b6b` |
+| 4 — User API | ✅ DONE — committed `b7c6c18` |
+| 5 — Event Integration | ✅ DONE — committed `500b36f` |
+| 6 — Admin UI | ✅ DONE — committed `d6f9454` |
+
+**OVERALL STATUS: ✅ ALL 6 PHASES COMPLETE (2026-03-26)**
 
 ---
 
-## Phase 3 — Tóm tắt (cần approve + commit)
+## Phase 3 — DONE (committed `7c91b6b`)
 
-### Files đã implement (chưa commit):
+### Files implemented:
 - `web/src/lib/webhookValidation.ts` — URL validation (IPv4 + IPv6 SSRF guard)
 - `web/src/lib/webhookEvents.ts` — thêm `test.ping` event type
 - `web/src/lib/webhookWorker.ts` — refactored to use shared `isValidWebhookUrl`
@@ -25,31 +27,23 @@
 - `web/src/app/api/admin/webhooks/[id]/deliveries/route.ts` — GET paginated logs
 - `web/src/app/api/admin/webhooks/[id]/deliveries/[deliveryId]/retry/route.ts` — POST retry
 
-### Test results: 10/10 passed, 0 critical issues
+---
 
-### Khi tiếp tục:
-1. Nói "approve" hoặc "tiếp tục" → commit Phase 3 → bắt đầu Phase 4
-2. Hoặc gõ `/code` → tự động detect và tiếp tục từ Phase 3
+## Phase 4 — DONE (committed `b7c6c18`)
+
+### Files implemented:
+- `web/src/app/api/webhooks/route.ts` — GET (list own) + POST (create, max 5)
+- `web/src/app/api/webhooks/[id]/route.ts` — GET + PUT + DELETE (ownership-guarded)
+- `web/src/app/api/webhooks/[id]/test/route.ts` — POST test delivery
+- `web/src/app/api/webhooks/[id]/deliveries/route.ts` — GET paginated logs
+
+All routes authenticated via `getUserSession()`, ownership strictly enforced.
 
 ---
 
-## Phase 4 — User API (tiếp theo)
+## Phase 5 — Event Integration (DONE)
 
-Cần implement:
-- `GET/POST /api/webhooks` — user tự quản lý webhooks (max 5/user)
-- `GET/PUT/DELETE /api/webhooks/[id]`
-- `POST /api/webhooks/[id]/test`
-- `GET /api/webhooks/[id]/deliveries`
-
-Key differences vs admin:
-- Auth: `getUserFromRequest()` thay vì `checkAdminAuth()`
-- `userId` = current user (không phải null)
-- Max 5 webhooks per user (enforce ở create)
-- Ownership guard: chỉ thấy webhook của mình
-
----
-
-## Phase 5 — Event Integration
+✅ **Completed: committed `500b36f`**
 
 Hook `dispatchWebhooks()` vào `processEvent.ts`:
 - After session upsert → emit `session.created`
@@ -57,9 +51,16 @@ Hook `dispatchWebhooks()` vào `processEvent.ts`:
 - After event created (tool_use, assistant_message, user_prompt) → emit tương ứng
 - `dispatchWebhooks()` **không được throw** — wrap try/catch
 
+Query matching logic:
+- `session.created` / `session.ended` → match by `userId` (all webhooks for that user)
+- `event.tool_use` / `event.assistant_message` / `event.user_prompt` → match by `sessionId` → find user → match by `userId`
+- Filter webhooks by `active` + event in `events` array
+
 ---
 
-## Phase 6 — Admin UI
+## Phase 6 — Admin UI (DONE)
+
+✅ **Completed: committed `d6f9454`**
 
 Thêm "Webhooks" tab vào `web/src/app/admin/page.tsx`:
 - Table: list webhooks với status
@@ -88,6 +89,12 @@ git add "src/app/api/admin/webhooks/[id]/deliveries/[deliveryId]/retry/route.ts"
 ```
 
 ---
+
+## Next steps
+
+1. **Integration tests** — write E2E tests for webhook delivery pipeline (dispatch → retry → audit log)
+2. **Webhook status in system health** — add webhook queue stats to `/api/health` endpoint
+3. **Deploy with npm run db:push** — execute `npm run db:push` on VPS to sync schema changes (Webhook + WebhookDelivery models)
 
 ## Deploy note
 

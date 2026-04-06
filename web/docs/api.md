@@ -10,6 +10,7 @@
 - [Events (Ingest)](#events-ingest)
 - [Sessions](#sessions)
 - [Stats & Reports](#stats--reports)
+- [Sync API](#sync-api)
 - [Projects & Departments](#projects--departments)
 - [Auth — User](#auth--user)
 - [Webhooks — User](#webhooks--user)
@@ -39,19 +40,29 @@ curl -c cookies.txt -X POST BASE_URL/api/admin/login \
 curl -b cookies.txt BASE_URL/api/admin/webhooks
 ```
 
-### User routes (`/api/webhooks/*`, `/api/report`, `/api/sessions`, v.v.)
+### User routes (`/api/webhooks/*`, `/api/report`, `/api/sessions`, `/api/sync`, v.v.)
 
 **Cách 1 — Cookie (browser):** Đăng nhập tại `/login`, cookie `user_session` tự động gửi kèm.
 
 **Cách 2 — Email + UUID (API / programmatic):**
 
 ```bash
-curl BASE_URL/api/webhooks \
+curl BASE_URL/api/sync \
   -H 'X-User-Email: user@example.com' \
   -H 'X-User-UUID: 550e8400-e29b-41d4-a716-446655440000'
 ```
 
 UUID = `user.id` trong DB — lấy tại trang `/profile` sau khi đăng nhập, hoặc từ response `POST /api/auth/register`.
+
+**Cách 3 — Email + Password (API / programmatic):**
+
+```bash
+curl BASE_URL/api/sync \
+  -H 'X-User-Email: user@example.com' \
+  -H 'X-User-Password: mypassword'
+```
+
+Dùng khi không có UUID (hoặc muốn auth bằng password trực tiếp). Chỉ hoạt động khi user đã set password. Thứ tự ưu tiên: **Cookie → UUID → Password**.
 
 ### Public routes (không cần auth)
 
@@ -250,6 +261,96 @@ AI-powered analysis (Gemini). Phân tích session hoặc events.
   "analysis": "In this session, the developer..."
 }
 ```
+
+---
+
+## Sync API
+
+### `GET /api/sync`
+
+Endpoint tổng hợp cho **bên thứ ba** — một request duy nhất trả về sessions + stats thay vì phải gọi nhiều endpoints riêng lẻ. Hỗ trợ incremental sync qua cursor.
+
+**Auth:** Cookie session, `X-User-Email` + `X-User-UUID`, hoặc `X-User-Email` + `X-User-Password`. Admin có thể xem tất cả user (optionally filter bằng `?user_id=`).
+
+**Query params:**
+
+| Param | Default | Mô tả |
+|---|---|---|
+| `since` | — | Chỉ lấy sessions bắt đầu từ ngày này (ISO date, VD: `2026-03-01`) |
+| `cursor` | — | Token từ response trước để lấy trang tiếp |
+| `limit` | `50` | Số sessions mỗi page (tối đa `200`) |
+| `include_events` | `false` | Kèm danh sách events của mỗi session (tối đa 500 events/session) |
+| `user_id` | — | Admin only: filter theo user cụ thể |
+
+**Response:**
+
+```json
+{
+  "ok": true,
+  "synced_at": "2026-03-27T10:00:00.000Z",
+  "has_more": false,
+  "cursor": null,
+  "stats": {
+    "total_sessions": 42,
+    "total_tokens": 1500000,
+    "estimated_cost_usd": 4.50,
+    "token_breakdown": {
+      "input": 800000,
+      "output": 400000,
+      "cache_creation": 200000,
+      "cache_read": 100000
+    }
+  },
+  "sessions": [
+    {
+      "id": "abc123",
+      "project_name": "my-app",
+      "project_path": "/home/user/my-app",
+      "model": "claude-sonnet-4-6",
+      "status": "completed",
+      "machine_id": "dev-laptop",
+      "started_at": "2026-03-27T08:00:00.000Z",
+      "ended_at": "2026-03-27T09:00:00.000Z",
+      "user_email": "user@example.com",
+      "input_tokens": 20000,
+      "output_tokens": 8000,
+      "cache_creation_tokens": 5000,
+      "cache_read_tokens": 2000,
+      "total_tokens": 35000,
+      "estimated_cost_usd": 0.0525,
+      "event_count": 24
+    }
+  ]
+}
+```
+
+**Ví dụ sử dụng:**
+
+```bash
+BASE=https://vibe-reporter.onebot-training.meobeo.ai
+
+# Lần đầu: lấy 30 ngày gần nhất
+curl "$BASE/api/sync?since=2026-03-01" \
+  -H 'X-User-Email: user@example.com' \
+  -H 'X-User-Password: mypassword'
+
+# Lần tiếp theo: incremental sync bằng cursor
+curl "$BASE/api/sync?cursor=<cursor_từ_response_trước>" \
+  -H 'X-User-Email: user@example.com' \
+  -H 'X-User-Password: mypassword'
+
+# Kèm events của mỗi session
+curl "$BASE/api/sync?include_events=true&limit=10" \
+  -H 'X-User-Email: user@example.com' \
+  -H 'X-User-UUID: 550e8400-e29b-41d4-a716-446655440000'
+
+# Admin: xem data của một user cụ thể
+curl -b admin-cookies.txt "$BASE/api/sync?user_id=<uuid>&since=2026-03-01"
+```
+
+> **Lưu ý:** `stats` luôn tính trên toàn bộ scope (không bị ảnh hưởng bởi pagination cursor). `sessions` là trang hiện tại. Khi `has_more = true`, dùng `cursor` để lấy trang tiếp.
+
+**Rate limit:** 120 requests/phút/user.
 
 ---
 

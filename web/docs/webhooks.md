@@ -389,36 +389,42 @@ curl -c cookies.txt -X POST https://vibe-reporter.onebot-training.meobeo.ai/api/
 curl -b cookies.txt https://vibe-reporter.onebot-training.meobeo.ai/api/admin/webhooks
 ```
 
-### User API — 2 cách auth
+### User API — 3 cách auth
 
 #### Cách 1: Cookie (browser)
 Đăng nhập tại `/login`, cookie `user_session` tự động gửi kèm từ browser.
 
 #### Cách 2: Email + UUID (API / programmatic)
 
-Thêm 2 headers vào mọi request:
-
 ```
 X-User-Email: user@example.com
 X-User-UUID:  <uuid-của-bạn>
 ```
 
-**Lấy UUID ở đâu?**
-- UUID = `user.id` trong DB — là Prisma UUID tự sinh khi đăng ký
-- Xem tại trang `/profile` sau khi login, hoặc từ response của `POST /api/auth/register`
-- UUID cũng được lưu trong localStorage dưới key `claude-reporter-uuid`
+**Lấy UUID ở đâu?** Xem tại trang `/profile` sau khi login, hoặc từ response `POST /api/auth/register`.
 
 ```bash
-# Ví dụ: list webhooks qua API key
+# List webhooks qua UUID
 curl https://vibe-reporter.onebot-training.meobeo.ai/api/webhooks \
   -H 'X-User-Email: user@example.com' \
   -H 'X-User-UUID: 550e8400-e29b-41d4-a716-446655440000'
+```
 
-# Tạo webhook
+#### Cách 3: Email + Password (API / programmatic)
+
+```
+X-User-Email:    user@example.com
+X-User-Password: mypassword
+```
+
+Dùng khi không có UUID. Chỉ hoạt động khi user đã set password (bcrypt verify).
+
+```bash
+# Tạo webhook qua password auth
 curl -X POST https://vibe-reporter.onebot-training.meobeo.ai/api/webhooks \
   -H 'Content-Type: application/json' \
   -H 'X-User-Email: user@example.com' \
-  -H 'X-User-UUID: 550e8400-e29b-41d4-a716-446655440000' \
+  -H 'X-User-Password: mypassword' \
   -d '{
     "targetUrl": "https://my-server.com/hook",
     "events": ["session.ended"],
@@ -428,14 +434,15 @@ curl -X POST https://vibe-reporter.onebot-training.meobeo.ai/api/webhooks \
 # Test delivery
 curl -X POST https://vibe-reporter.onebot-training.meobeo.ai/api/webhooks/WEBHOOK_ID/test \
   -H 'X-User-Email: user@example.com' \
-  -H 'X-User-UUID: 550e8400-e29b-41d4-a716-446655440000'
+  -H 'X-User-Password: mypassword'
 ```
 
+**Thứ tự ưu tiên:** Cookie → UUID → Password
+
 **Bảo mật:**
-- UUID được verify bằng DB lookup (không phải token tĩnh)
-- Email so sánh timing-safe để chống enumeration
-- Cả hai fields bắt buộc — UUID-only không đủ
-- Nếu UUID bị lộ: đổi password để invalidate sessions; UUID hiện tại vẫn là user.id (cân nhắc rotation nếu cần)
+- UUID: verify bằng DB lookup + timing-safe email compare
+- Password: bcrypt verify, constant-time để chống user enumeration
+- Cả UUID và Password đều yêu cầu kèm email — không thể dùng mỗi credentials một mình
 
 ---
 

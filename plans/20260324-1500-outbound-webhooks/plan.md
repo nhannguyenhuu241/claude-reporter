@@ -1,6 +1,6 @@
 # Outbound Webhook / Integration API - Implementation Plan
 
-**Date:** 2026-03-24 | **Status:** In Progress | **Est. effort:** 8-10 days
+**Date:** 2026-03-24 | **Status:** COMPLETE ✓ — all 6 phases done (2026-03-26) | **Est. effort:** 8-10 days
 
 ---
 
@@ -39,10 +39,10 @@ processEvent() ─────────────────────�
 |-------|------|---------|--------|
 | 1 | [phase-01-database-schema.md](./phase-01-database-schema.md) | Prisma `Webhook` + `WebhookDelivery` models | DONE ✓ (2026-03-24) |
 | 2 | [phase-02-delivery-engine.md](./phase-02-delivery-engine.md) | BullMQ queue, worker, HMAC signing | DONE ✓ (2026-03-24) |
-| 3 | [phase-03-admin-api.md](./phase-03-admin-api.md) | `/api/admin/webhooks` CRUD + test + logs | **READY TO COMMIT** — code done, tests 10/10, awaiting user commit approval |
-| 4 | [phase-04-user-api.md](./phase-04-user-api.md) | `/api/webhooks` self-service for authed users | Pending |
-| 5 | [phase-05-event-integration.md](./phase-05-event-integration.md) | Hook into `processEvent.ts` dispatch | Pending |
-| 6 | [phase-06-admin-ui.md](./phase-06-admin-ui.md) | "Webhooks" tab in admin dashboard | Pending |
+| 3 | [phase-03-admin-api.md](./phase-03-admin-api.md) | `/api/admin/webhooks` CRUD + test + logs | DONE ✓ (2026-03-26) |
+| 4 | [phase-04-user-api.md](./phase-04-user-api.md) | `/api/webhooks` self-service for authed users | DONE ✓ (2026-03-26) |
+| 5 | [phase-05-event-integration.md](./phase-05-event-integration.md) | Hook into `processEvent.ts` dispatch | DONE ✓ (2026-03-26) |
+| 6 | [phase-06-admin-ui.md](./phase-06-admin-ui.md) | "Webhooks" tab in admin dashboard | DONE ✓ (2026-03-26) |
 
 ## Key Decisions
 
