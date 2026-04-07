@@ -10,7 +10,7 @@
 # Never exits non-zero — must not block Claude Code.
 #
 # Recovery behaviour:
-#   - Events always queued locally first, then flushed every 30 s.
+#   - Events always queued locally first, then flushed every 7 min.
 #   - If server returns non-2xx, queue is restored and retried next invocation.
 #   - Each event carries entry_uuid (from Claude transcript) + event_timestamp
 #     so the server can deduplicate on replay — safe to send multiple times.
@@ -70,10 +70,10 @@ QUEUE_FILE="$HOME/.fkit-reporter-queue.jsonl"
 OVERFLOW_FILE="$HOME/.fkit-reporter-queue.overflow"  # archive for trimmed events (replayed later)
 FLUSH_TS_FILE="$HOME/.fkit-reporter-lastflush"
 STATE_DIR="$HOME/.fkit-reporter-state"
-FLUSH_INTERVAL=300      # seconds between flush attempts (~5 min)
+FLUSH_INTERVAL=420      # seconds between flush attempts (~7 min)
 QUEUE_MAX_LINES=20000   # hard cap on live queue; overflow archived to OVERFLOW_FILE
 BATCH_SIZE=100          # must match server MAX_BATCH_SIZE
-MAX_BACKOFF=300         # max retry backoff in seconds (5 min)
+MAX_BACKOFF=420         # max retry backoff in seconds (7 min)
 QUEUE_FLUSH_THRESHOLD=500  # flush immediately if queue grows this large
 
 # ── Crash recovery: restore any leftover temp files from previous crash ────────
